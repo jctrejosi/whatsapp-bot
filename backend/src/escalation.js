@@ -8,17 +8,6 @@ const MAX_NEGATIVE = parseInt(process.env.MAX_NEGATIVE_RESPONSES || '3');
 // Track consecutive negative responses per user (in memory — resets on restart)
 const negativeCounts = new Map();
 
-// Track message counts to prevent early escalation
-const messageCounts = new Map();
-const MIN_MESSAGES_BEFORE_ESCALATE = 2;
-
-// Greetings — don't escalate on these
-const GREETINGS = [
-  'hola', 'buenos días', 'buenas tardes', 'buenas noches', 'hey', 'hello', 'hi',
-  'cómo estás', 'como estas', 'cómo va', 'como va', 'qué tal', 'que tal',
-  'saludos', 'buenas', 'mucho gusto', 'gracias', 'ok', 'vale', 'bien', 'bien y tu',
-];
-
 // Track pending escalations waiting for user confirmation
 const pendingEscalations = new Map();
 
@@ -41,52 +30,31 @@ const ESCALATION_KEYWORDS = [
 
 /**
  * Check if the conversation should be escalated to a human.
- * @returns {{ escalate: boolean, reason: string }}
+ * Two cases only:
+ *   1. User explicitly asks for an advisor (keywords)
+ *   2. User asks something unknown 3+ times in a row
  */
 function shouldEscalate(userId, query, chunks, error) {
   const queryLower = query.toLowerCase().trim();
 
-  // Never escalate on greetings / first contact
-  if (GREETINGS.some(g => queryLower.includes(g))) {
-    return { escalate: false, reason: '' };
-  }
-
-  // Track message count
-  const msgCount = (messageCounts.get(userId) || 0) + 1;
-  messageCounts.set(userId, msgCount);
-
-  // Case 2: User explicitly asks for an advisor (always escalate regardless of count)
+  // Case 1: User explicitly asks for an advisor
   if (ESCALATION_KEYWORDS.some(kw => queryLower.includes(kw))) {
     return { escalate: true, reason: 'El usuario solicitó hablar con un asesor' };
   }
 
-  // Case 4: API error (always escalate)
-  if (error) {
-    return { escalate: true, reason: `Error de API: ${error}` };
-  }
-
-  // Cases below only trigger after minimum messages
-  if (msgCount < MIN_MESSAGES_BEFORE_ESCALATE) {
-    return { escalate: false, reason: '' };
-  }
-
-  // Case 1: No information found (only after several attempts)
-  if (chunks && chunks.length === 0 && query.length > 20) {
-    return { escalate: true, reason: 'No se encontró información en la base de conocimiento' };
-  }
-
-  // Case 3: Low confidence (only after several attempts)
-  if (chunks && chunks.length > 0) {
-    const maxSim = Math.max(...chunks.map(c => c.similarity || 0));
-    if (maxSim < MIN_CONFIDENCE) {
-      return { escalate: true, reason: `Baja confianza (${maxSim.toFixed(2)} < ${MIN_CONFIDENCE})` };
+  // Track unknown questions (no relevant info or very short query that looks like frustration)
+  if (!chunks || chunks.length === 0 || (chunks.length > 0 && Math.max(...chunks.map(c => c.similarity || 0)) < 0.15)) {
+    const count = trackNegative(userId);
+    if (count >= MAX_NEGATIVE) {
+      resetNegative(userId);
+      return { escalate: true, reason: `${count} preguntas sin respuesta clara consecutivas` };
     }
+  } else {
+    resetNegative(userId);
   }
 
   return { escalate: false, reason: '' };
 }
-
-// ─── Negative response tracking ──────────────────────────────────────────
 
 function trackNegative(userId) {
   const count = (negativeCounts.get(userId) || 0) + 1;
@@ -98,19 +66,7 @@ function resetNegative(userId) {
   negativeCounts.delete(userId);
 }
 
-/**
- * Check Case 5: too many consecutive negative responses.
- */
-function checkNegativeThreshold(userId) {
-  const count = negativeCounts.get(userId) || 0;
-  if (count >= MAX_NEGATIVE) {
-    resetNegative(userId);
-    return { escalate: true, reason: `${count} respuestas negativas consecutivas` };
-  }
-  return { escalate: false, reason: '' };
-}
-
-// ─── Send escalation email via Resend ─────────────────────────────────────
+// ─── Permission-based escalation ────────────────────────────────────────
 
 async function sendEscalationEmail({ userId, userName, query, history, reason }) {
   if (!RESEND_API_KEY) {
@@ -201,7 +157,6 @@ module.exports = {
   shouldEscalate,
   trackNegative,
   resetNegative,
-  checkNegativeThreshold,
   sendEscalationEmail,
   checkPendingEscalation,
   setPendingEscalation,

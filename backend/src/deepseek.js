@@ -1,6 +1,6 @@
 const axios = require('axios');
 const {
-  shouldEscalate, trackNegative, resetNegative, checkNegativeThreshold,
+  shouldEscalate, trackNegative, resetNegative,
   sendEscalationEmail, checkPendingEscalation, setPendingEscalation, clearPendingEscalation
 } = require('./escalation');
 
@@ -69,16 +69,6 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     return await askForEscalation({
       userId, userName, query: userMessage,
       reason: preEscalate.reason,
-      chunks: relevantChunks,
-    });
-  }
-
-  // Check Case 5 (negative threshold) from previous interactions
-  const negCheck = checkNegativeThreshold(userId);
-  if (negCheck.escalate) {
-    return await askForEscalation({
-      userId, userName, query: userMessage,
-      reason: negCheck.reason,
       chunks: relevantChunks,
     });
   }
