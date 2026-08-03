@@ -8,6 +8,9 @@ const MAX_NEGATIVE = parseInt(process.env.MAX_NEGATIVE_RESPONSES || '3');
 // Track consecutive negative responses per user (in memory — resets on restart)
 const negativeCounts = new Map();
 
+// Track pending escalations waiting for user confirmation
+const pendingEscalations = new Map();
+
 // ─── Keywords that trigger immediate escalation ──────────────────────────
 
 const ESCALATION_KEYWORDS = [
@@ -131,10 +134,51 @@ async function sendEscalationEmail({ userId, userName, query, history, reason })
   }
 }
 
+// ─── Permission-based escalation ────────────────────────────────────────
+
+/**
+ * Check if user has a pending escalation and is now responding to it.
+ * @returns {{ pending: true, confirm: boolean, escalationData: object } | { pending: false }}
+ */
+function checkPendingEscalation(userId, userMessage) {
+  const pending = pendingEscalations.get(userId);
+  if (!pending) return { pending: false };
+
+  const msg = userMessage.toLowerCase().trim();
+  const yes = ['sí', 'si', 'yes', 'dale', 'envíale', 'enviale', 'ok', 'vale', 'claro', 'por favor', 'porfa', 'gracias', 'bueno', 'de acuerdo'];
+  const no = ['no', 'nop', 'nope', 'cancelar', 'espera'];
+
+  const confirmed = yes.some(w => msg === w || msg.startsWith(w + ' ') || msg.includes(' ' + w + ' ') || msg.includes(' ' + w));
+  const rejected = no.some(w => msg === w || msg.startsWith(w + ' ') || msg.includes(' ' + w + ' ') || msg.includes(' ' + w));
+
+  if (confirmed) {
+    pendingEscalations.delete(userId);
+    return { pending: true, confirm: true, escalationData: pending };
+  }
+  if (rejected) {
+    pendingEscalations.delete(userId);
+    return { pending: true, confirm: false, escalationData: pending };
+  }
+  // User said something else — treat as no and continue
+  pendingEscalations.delete(userId);
+  return { pending: true, confirm: false, escalationData: pending };
+}
+
+function setPendingEscalation(userId, data) {
+  pendingEscalations.set(userId, data);
+}
+
+function clearPendingEscalation(userId) {
+  pendingEscalations.delete(userId);
+}
+
 module.exports = {
   shouldEscalate,
   trackNegative,
   resetNegative,
   checkNegativeThreshold,
   sendEscalationEmail,
+  checkPendingEscalation,
+  setPendingEscalation,
+  clearPendingEscalation,
 };

@@ -1,5 +1,8 @@
 const axios = require('axios');
-const { shouldEscalate, trackNegative, resetNegative, checkNegativeThreshold, sendEscalationEmail } = require('./escalation');
+const {
+  shouldEscalate, trackNegative, resetNegative, checkNegativeThreshold,
+  sendEscalationEmail, checkPendingEscalation, setPendingEscalation, clearPendingEscalation
+} = require('./escalation');
 
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 const KNOWLEDGE_SERVICE_URL = process.env.KNOWLEDGE_SERVICE_URL || 'http://localhost:8000';
@@ -29,6 +32,23 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
   let relevantChunks = [];
   let error = null;
 
+  // ── Check if user is responding to a pending escalation ────────────
+  const pendingCheck = checkPendingEscalation(userId, userMessage);
+  if (pendingCheck.pending) {
+    if (pendingCheck.confirm) {
+      // User confirmed — send the escalation email
+      const escalationData = pendingCheck.escalationData;
+      await sendEscalationEmail(escalationData);
+      return {
+        answer: '¡Listo! Ya notifiqué a nuestro equipo. Te contactarán pronto al número ' + (userName || userId) + '. ¿Necesitas algo más mientras tanto? 😊',
+        chunks: [],
+        escalated: true,
+      };
+    }
+    // User rejected or said something else — cancel escalation
+    clearPendingEscalation(userId);
+  }
+
   // 1. Retrieve relevant knowledge
   try {
     relevantChunks = await searchKnowledge(userMessage);
@@ -39,22 +59,20 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
   // ── Escalation check BEFORE generating response ─────────────────
   const preEscalate = shouldEscalate(userId, userMessage, relevantChunks, error);
   if (preEscalate.escalate) {
-    return await handleEscalation({
+    return await askForEscalation({
       userId, userName, query: userMessage,
       reason: preEscalate.reason,
       chunks: relevantChunks,
-      history: [],
     });
   }
 
   // Check Case 5 (negative threshold) from previous interactions
   const negCheck = checkNegativeThreshold(userId);
   if (negCheck.escalate) {
-    return await handleEscalation({
+    return await askForEscalation({
       userId, userName, query: userMessage,
       reason: negCheck.reason,
       chunks: relevantChunks,
-      history: [],
     });
   }
 
@@ -140,20 +158,18 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     }
   } catch (err) {
     // Case 4: API error
-    return await handleEscalation({
+    return await askForEscalation({
       userId, userName, query: userMessage,
       reason: `Error de API: ${err.message}`,
       chunks: relevantChunks,
-      history: [],
     });
   }
 
   if (!content || content.trim().length === 0) {
-    return await handleEscalation({
+    return await askForEscalation({
       userId, userName, query: userMessage,
       reason: 'DeepSeek devolvió respuesta vacía después de reintento',
       chunks: relevantChunks,
-      history: [],
     });
   }
 
@@ -163,18 +179,30 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
   return { answer: content, chunks: relevantChunks, escalated: false };
 }
 
-// ─── Escalation handler ──────────────────────────────────────────────────
+// ─── Escalation handlers ────────────────────────────────────────────────
 
-async function handleEscalation({ userId, userName, query, reason, chunks, history }) {
+async function askForEscalation({ userId, userName, query, reason, chunks }) {
+  console.log(`⚠️  Escalación pendiente — ${reason}`);
+
+  // Store escalation data for when user responds
+  setPendingEscalation(userId, { userId, userName, query, reason });
+
+  return {
+    answer:
+      'Parece que necesitas ayuda más personalizada para tu consulta. ' +
+      '¿Quieres que le notifique a uno de nuestros asesores para que te contacte? ' +
+      'Responde "sí" para enviar la notificación o "no" para continuar. 😊',
+    chunks,
+    escalated: false, // not yet — waiting for confirmation
+  };
+}
+
+async function handleEscalation({ userId, userName, query, reason, chunks }) {
   console.log(`🚨 ESCALANDO — ${reason}`);
-
-  // Send email
-  const sent = await sendEscalationEmail({ userId, userName, query, history, reason, chunks });
-
+  const sent = await sendEscalationEmail({ userId, userName, query, reason });
   const message = sent
-    ? 'He notificado a nuestro equipo de asesores sobre tu consulta. Te contactarán pronto. ¿Necesitas algo más mientras tanto? 😊'
+    ? '¡Listo! He notificado a nuestro equipo de asesores. Te contactarán pronto al número proporcionado. ¿Necesitas algo más mientras tanto? 😊'
     : 'Voy a transferirte con un asesor humano para atenderte mejor. Por favor espera un momento. 🙏';
-
   return { answer: message, chunks, escalated: true };
 }
 
