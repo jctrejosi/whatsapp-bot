@@ -3,7 +3,7 @@ const axios = require('axios');
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const ESCALATION_EMAIL = process.env.ESCALATION_EMAIL || 'info@angelasvacations.com';
 const MIN_CONFIDENCE = parseFloat(process.env.MIN_CONFIDENCE || '0.65');
-const MAX_NEGATIVE = parseInt(process.env.MAX_NEGATIVE_RESPONSES || '3');
+const MAX_NEGATIVE = parseInt(process.env.MAX_NEGATIVE_RESPONSES || '5');
 
 // Track consecutive negative responses per user (in memory — resets on restart)
 const negativeCounts = new Map();
@@ -58,7 +58,8 @@ function shouldEscalate(userId, query, chunks) {
  * If it gave a good answer, reset it.
  */
 function wasAnswerClear(chunks) {
-  return chunks && chunks.length > 0 && Math.max(...chunks.map(c => c.similarity || 0)) >= 0.15;
+  // Only count as unclear if the knowledge base returned NOTHING at all
+  return chunks && chunks.length > 0;
 }
 
 function trackNegative(userId) {
