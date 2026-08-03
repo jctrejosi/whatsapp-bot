@@ -470,6 +470,34 @@ async def log_conversation(req: ConversationRequest):
     return {"id": str(cid), "status": "logged"}
 
 
+@app.get("/conversations/{user_id}")
+async def get_conversations(user_id: str, limit: int = 50):
+    """Get conversation history for a user."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, user_id, user_name, message, response, chunks_used, created_at
+            FROM conversations
+            WHERE user_id = $1
+            ORDER BY created_at DESC
+            LIMIT $2
+            """,
+            user_id, limit,
+        )
+    return [
+        {
+            "id": str(r["id"]),
+            "user_id": r["user_id"],
+            "user_name": r["user_name"],
+            "message": r["message"],
+            "response": r["response"],
+            "created_at": r["created_at"].isoformat(),
+        }
+        for r in rows
+    ]
+
+
 @app.get("/health")
 async def health():
     """Health check — also verifies DB connectivity."""

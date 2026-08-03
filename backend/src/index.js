@@ -76,6 +76,15 @@ app.post('/webhook', async (req, res) => {
       const aiResponse = await chatWithDeepSeek(messageText, senderName);
       console.log(`Respuesta DeepSeek: "${aiResponse}"`);
 
+      // Save conversation asynchronously (don't block response)
+      knowledge.post('/conversations', {
+        user_id: senderPhone,
+        user_name: senderName,
+        message: messageText,
+        response: aiResponse,
+        chunks_used: [],
+      }).catch(err => console.warn('Conversation save failed:', err.message));
+
       // Send response back to WhatsApp
       await sendMessage(senderPhone, aiResponse);
       console.log('Respuesta enviada a WhatsApp');
@@ -127,6 +136,17 @@ app.get('/health', async (req, res) => {
     res.json(data);
   } catch (e) {
     console.error(`Proxy /health FAILED: ${e.code || e.message}`);
+    res.status(502).json({ error: 'Knowledge service unreachable' });
+  }
+});
+
+// ─── Conversation history ──────────────────────────────────────────────
+app.get('/conversations/:userId', async (req, res) => {
+  try {
+    const { data } = await knowledge.get(`/conversations/${req.params.userId}`);
+    res.json(data);
+  } catch (e) {
+    console.error(`Proxy /conversations FAILED: ${e.code || e.message}`);
     res.status(502).json({ error: 'Knowledge service unreachable' });
   }
 });
