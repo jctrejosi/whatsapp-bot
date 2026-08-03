@@ -89,12 +89,14 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
       '- Si ya hay historial, NO vuelvas a saludar ni a presentarte. Contin\u00faa la conversaci\u00f3n donde qued\u00f3.\n\n' +
       'LO QUE SABES (datos del evento):\n' +
       `${context}\n\n` +
+      'CÓMO ARMAR PLANES (RAZONAMIENTO):\n' +
+      '- Cada cabina tiene máximo 4 personas.\n' +
+      '- Los precios son POR PERSONA y varían según si es huésped 1-2, huésped 3-4, o menor de 17.\n' +
+      '- Para calcular: distribuye las personas en cabinas, asigna precios según posición, y suma.\n' +
+      '- Ejemplo: 2 adultos + 2 menores en cabina Interior → (2 × $1,736.26) + (2 × $955.26) = $5,383.04\n' +
+      '- SIEMPRE muestra el desglose por cabina y el total.\n' +
+      '- Si el cliente no especifica tipo de cabina, calcula con Interior (la más económica) y menciónale las otras opciones.\n\n' +
       'REGLAS:\n' +
-      '- Puedes HACER CÁLCULOS y armar planes personalizados usando los precios de arriba.\n' +
-      '- Si el cliente te da número de personas, edades y tipo de cabina, calcula el costo total.\n' +
-      '- Sugiere la distribución de cabinas más eficiente. Máximo 4 personas por cabina.\n' +
-      '- Muestra el desglose: cuánto paga cada grupo (adultos vs menores de 17).\n' +
-      '- Si te faltan datos para calcular (ej: no especificaron tipo de cabina), pregunta.\n' +
       '- Si te preguntan algo que NO está en los datos de arriba, di que no tienes ese detalle ' +
       'pero ofrece información relacionada que SÍ conozcas.\n' +
       '- NO inventes precios, fechas ni condiciones que no estén arriba.\n' +
@@ -125,7 +127,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
           { role: 'user', content: userMessage },
         ],
         temperature: 0.7,
-        max_tokens: 800,
+        max_tokens: 1200,
       },
       {
         headers: {
@@ -148,7 +150,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
             { role: 'user', content: userMessage },
           ],
           temperature: 0.7,
-          max_tokens: 1500,
+          max_tokens: 2000,
         },
         {
           headers: {
