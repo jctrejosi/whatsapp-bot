@@ -34,26 +34,31 @@ const ESCALATION_KEYWORDS = [
  *   1. User explicitly asks for an advisor (keywords)
  *   2. User asks something unknown 3+ times in a row
  */
-function shouldEscalate(userId, query, chunks, error) {
+function shouldEscalate(userId, query, chunks) {
   const queryLower = query.toLowerCase().trim();
 
   // Case 1: User explicitly asks for an advisor
   if (ESCALATION_KEYWORDS.some(kw => queryLower.includes(kw))) {
+    resetNegative(userId);
     return { escalate: true, reason: 'El usuario solicitó hablar con un asesor' };
   }
 
-  // Track unknown questions (no relevant info or very short query that looks like frustration)
-  if (!chunks || chunks.length === 0 || (chunks.length > 0 && Math.max(...chunks.map(c => c.similarity || 0)) < 0.15)) {
-    const count = trackNegative(userId);
-    if (count >= MAX_NEGATIVE) {
-      resetNegative(userId);
-      return { escalate: true, reason: `${count} preguntas sin respuesta clara consecutivas` };
-    }
-  } else {
+  // Case 2: Check negative threshold
+  const count = negativeCounts.get(userId) || 0;
+  if (count >= MAX_NEGATIVE) {
     resetNegative(userId);
+    return { escalate: true, reason: `${count} preguntas sin respuesta clara consecutivas` };
   }
 
   return { escalate: false, reason: '' };
+}
+
+/**
+ * If the bot couldn't give a clear answer, increment the negative counter.
+ * If it gave a good answer, reset it.
+ */
+function wasAnswerClear(chunks) {
+  return chunks && chunks.length > 0 && Math.max(...chunks.map(c => c.similarity || 0)) >= 0.15;
 }
 
 function trackNegative(userId) {
@@ -157,6 +162,7 @@ module.exports = {
   shouldEscalate,
   trackNegative,
   resetNegative,
+  wasAnswerClear,
   sendEscalationEmail,
   checkPendingEscalation,
   setPendingEscalation,

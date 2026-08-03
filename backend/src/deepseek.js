@@ -1,6 +1,6 @@
 const axios = require('axios');
 const {
-  shouldEscalate, trackNegative, resetNegative,
+  shouldEscalate, trackNegative, resetNegative, wasAnswerClear,
   sendEscalationEmail, checkPendingEscalation, setPendingEscalation, clearPendingEscalation
 } = require('./escalation');
 
@@ -64,7 +64,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
   }
 
   // ── Escalation check BEFORE generating response ─────────────────
-  const preEscalate = shouldEscalate(userId, userMessage, relevantChunks, error);
+  const preEscalate = shouldEscalate(userId, userMessage, relevantChunks);
   if (preEscalate.escalate) {
     return await askForEscalation({
       userId, userName, query: userMessage,
@@ -185,8 +185,14 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     });
   }
 
-  // Successful response — reset negative counter and save to history
-  resetNegative(userId);
+  // Track negative or reset based on answer quality
+  if (wasAnswerClear(relevantChunks)) {
+    resetNegative(userId);
+  } else {
+    trackNegative(userId);
+  }
+
+  // Save to history
   history.push({ role: 'user', text: userMessage.substring(0, 200) });
   history.push({ role: 'assistant', text: content.substring(0, 300) });
   if (history.length > 6) history.splice(0, history.length - 6);
