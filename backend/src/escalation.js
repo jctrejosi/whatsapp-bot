@@ -8,6 +8,17 @@ const MAX_NEGATIVE = parseInt(process.env.MAX_NEGATIVE_RESPONSES || '3');
 // Track consecutive negative responses per user (in memory — resets on restart)
 const negativeCounts = new Map();
 
+// Track message counts to prevent early escalation
+const messageCounts = new Map();
+const MIN_MESSAGES_BEFORE_ESCALATE = 2;
+
+// Greetings — don't escalate on these
+const GREETINGS = [
+  'hola', 'buenos días', 'buenas tardes', 'buenas noches', 'hey', 'hello', 'hi',
+  'cómo estás', 'como estas', 'cómo va', 'como va', 'qué tal', 'que tal',
+  'saludos', 'buenas', 'mucho gusto', 'gracias', 'ok', 'vale', 'bien', 'bien y tu',
+];
+
 // Track pending escalations waiting for user confirmation
 const pendingEscalations = new Map();
 
@@ -35,27 +46,41 @@ const ESCALATION_KEYWORDS = [
 function shouldEscalate(userId, query, chunks, error) {
   const queryLower = query.toLowerCase().trim();
 
-  // Case 1: No information found
-  if (chunks && chunks.length === 0) {
-    return { escalate: true, reason: 'No se encontró información en la base de conocimiento' };
+  // Never escalate on greetings / first contact
+  if (GREETINGS.some(g => queryLower.includes(g))) {
+    return { escalate: false, reason: '' };
   }
 
-  // Case 2: User explicitly asks for an advisor
+  // Track message count
+  const msgCount = (messageCounts.get(userId) || 0) + 1;
+  messageCounts.set(userId, msgCount);
+
+  // Case 2: User explicitly asks for an advisor (always escalate regardless of count)
   if (ESCALATION_KEYWORDS.some(kw => queryLower.includes(kw))) {
     return { escalate: true, reason: 'El usuario solicitó hablar con un asesor' };
   }
 
-  // Case 3: Low confidence
+  // Case 4: API error (always escalate)
+  if (error) {
+    return { escalate: true, reason: `Error de API: ${error}` };
+  }
+
+  // Cases below only trigger after minimum messages
+  if (msgCount < MIN_MESSAGES_BEFORE_ESCALATE) {
+    return { escalate: false, reason: '' };
+  }
+
+  // Case 1: No information found (only after several attempts)
+  if (chunks && chunks.length === 0 && query.length > 20) {
+    return { escalate: true, reason: 'No se encontró información en la base de conocimiento' };
+  }
+
+  // Case 3: Low confidence (only after several attempts)
   if (chunks && chunks.length > 0) {
     const maxSim = Math.max(...chunks.map(c => c.similarity || 0));
     if (maxSim < MIN_CONFIDENCE) {
       return { escalate: true, reason: `Baja confianza (${maxSim.toFixed(2)} < ${MIN_CONFIDENCE})` };
     }
-  }
-
-  // Case 4: API error
-  if (error) {
-    return { escalate: true, reason: `Error de API: ${error}` };
   }
 
   return { escalate: false, reason: '' };
