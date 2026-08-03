@@ -37,17 +37,26 @@ async function searchKnowledge(query) {
  * Call DeepSeek with optional function calling.
  * If the model returns tool_calls, execute them and call again with results.
  */
-async function callDeepSeek(messages, tools = null) {
+async function callDeepSeek(messages, tools = null, attempt = 1) {
+  const maxTokens = attempt === 1 ? 1200 : attempt === 2 ? 2000 : 3000;
+
   const body = {
     model: 'deepseek-v4-flash',
     messages,
     temperature: 0.7,
-    max_tokens: 1200,
+    max_tokens: maxTokens,
   };
   if (tools) body.tools = tools;
 
   let { data } = await axios.post('https://api.deepseek.com/chat/completions', body, { headers: DEEPSEEK_HEADERS });
   const msg = data.choices[0].message;
+  const finishReason = data.choices[0].finish_reason;
+
+  // If response was truncated, retry with more tokens
+  if (finishReason === 'length' && attempt < 3 && msg.content && !msg.tool_calls) {
+    console.log(`⚠️  Respuesta truncada (${msg.content.length} chars), reintentando con ${maxTokens * 1.7} tokens...`);
+    return callDeepSeek(messages, tools, attempt + 1);
+  }
 
   // Handle function calling
   if (msg.tool_calls && msg.tool_calls.length > 0) {
@@ -164,11 +173,6 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
   try {
     const msg = await callDeepSeek(messages, TOOLS);
     content = msg.content;
-
-    if (!content || content.trim().length === 0) {
-      const retry = await callDeepSeek(messages, TOOLS);
-      content = retry.content;
-    }
   } catch (err) {
     console.error('DeepSeek error:', err.message);
     return { answer: 'Lo siento, tuve un problema técnico. ¿Puedes intentarlo de nuevo? 🙏', chunks: [], escalated: false };
