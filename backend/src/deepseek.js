@@ -39,38 +39,11 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
   if (!conversationHistory.has(userId)) conversationHistory.set(userId, []);
   const history = conversationHistory.get(userId);
 
-  // ── Check if user is responding to a pending escalation ────────────
-  const pendingCheck = checkPendingEscalation(userId, userMessage);
-  if (pendingCheck.pending) {
-    if (pendingCheck.confirm) {
-      // User confirmed — send the escalation email
-      const escalationData = pendingCheck.escalationData;
-      await sendEscalationEmail(escalationData);
-      return {
-        answer: '¡Listo! Ya notifiqué a nuestro equipo. Te contactarán pronto al número ' + (userName || userId) + '. ¿Necesitas algo más mientras tanto? 😊',
-        chunks: [],
-        escalated: true,
-      };
-    }
-    // User rejected or said something else — cancel escalation
-    clearPendingEscalation(userId);
-  }
-
   // 1. Retrieve relevant knowledge
   try {
     relevantChunks = await searchKnowledge(userMessage);
   } catch (err) {
     error = err.message;
-  }
-
-  // ── Escalation check BEFORE generating response ─────────────────
-  const preEscalate = shouldEscalate(userId, userMessage, relevantChunks);
-  if (preEscalate.escalate) {
-    return await askForEscalation({
-      userId, userName, query: userMessage,
-      reason: preEscalate.reason,
-      chunks: relevantChunks,
-    });
   }
 
   // 2. Build system prompt
@@ -169,20 +142,12 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
       content = retry.data.choices[0].message.content;
     }
   } catch (err) {
-    // Case 4: API error
-    return await askForEscalation({
-      userId, userName, query: userMessage,
-      reason: `Error de API: ${err.message}`,
-      chunks: relevantChunks,
-    });
+    console.error('DeepSeek error:', err.message);
+    return { answer: 'Lo siento, tuve un problema técnico. ¿Puedes intentarlo de nuevo? 🙏', chunks: [], escalated: false };
   }
 
   if (!content || content.trim().length === 0) {
-    return await askForEscalation({
-      userId, userName, query: userMessage,
-      reason: 'DeepSeek devolvió respuesta vacía después de reintento',
-      chunks: relevantChunks,
-    });
+    return { answer: 'Lo siento, no pude procesar tu mensaje. ¿Puedes intentarlo de nuevo?', chunks: [], escalated: false };
   }
 
   // Save to history
@@ -191,33 +156,6 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
   if (history.length > 6) history.splice(0, history.length - 6);
 
   return { answer: content, chunks: relevantChunks, escalated: false };
-}
-
-// ─── Escalation handlers ────────────────────────────────────────────────
-
-async function askForEscalation({ userId, userName, query, reason, chunks }) {
-  console.log(`⚠️  Escalación pendiente — ${reason}`);
-
-  // Store escalation data for when user responds
-  setPendingEscalation(userId, { userId, userName, query, reason });
-
-  return {
-    answer:
-      'Parece que necesitas ayuda más personalizada para tu consulta. ' +
-      '¿Quieres que le notifique a uno de nuestros asesores para que te contacte? ' +
-      'Responde "sí" para enviar la notificación o "no" para continuar. 😊',
-    chunks,
-    escalated: false, // not yet — waiting for confirmation
-  };
-}
-
-async function handleEscalation({ userId, userName, query, reason, chunks }) {
-  console.log(`🚨 ESCALANDO — ${reason}`);
-  const sent = await sendEscalationEmail({ userId, userName, query, reason });
-  const message = sent
-    ? '¡Listo! He notificado a nuestro equipo de asesores. Te contactarán pronto al número proporcionado. ¿Necesitas algo más mientras tanto? 😊'
-    : 'Voy a transferirte con un asesor humano para atenderte mejor. Por favor espera un momento. 🙏';
-  return { answer: message, chunks, escalated: true };
 }
 
 module.exports = { chatWithDeepSeek, searchKnowledge };
