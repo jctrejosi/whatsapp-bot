@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { shouldEscalate, trackNegative, resetNegative, checkNegativeThreshold, sendEscalationEmail } = require('./escalation');
 
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 const KNOWLEDGE_SERVICE_URL = process.env.KNOWLEDGE_SERVICE_URL || 'http://localhost:8000';
@@ -21,16 +22,43 @@ async function searchKnowledge(query) {
 }
 
 /**
- * Send a message to DeepSeek V4 Flash, answering ONLY from the knowledge base.
- * @param {string} userMessage - The user's message text
- * @param {string} userName - The user's name for personalization
- * @returns {Promise<string>} The AI response text
+ * Send a message to DeepSeek V4 Flash and handle escalation if needed.
+ * @returns {Promise<{ answer: string, chunks: Array, escalated: boolean }>}
  */
-async function chatWithDeepSeek(userMessage, userName = 'Usuario') {
-  // 1. Retrieve relevant knowledge
-  const relevantChunks = await searchKnowledge(userMessage);
+async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unknown') {
+  let relevantChunks = [];
+  let error = null;
 
-  // 2. Build system prompt — strictly bound to the knowledge base
+  // 1. Retrieve relevant knowledge
+  try {
+    relevantChunks = await searchKnowledge(userMessage);
+  } catch (err) {
+    error = err.message;
+  }
+
+  // ── Escalation check BEFORE generating response ─────────────────
+  const preEscalate = shouldEscalate(userId, userMessage, relevantChunks, error);
+  if (preEscalate.escalate) {
+    return await handleEscalation({
+      userId, userName, query: userMessage,
+      reason: preEscalate.reason,
+      chunks: relevantChunks,
+      history: [],
+    });
+  }
+
+  // Check Case 5 (negative threshold) from previous interactions
+  const negCheck = checkNegativeThreshold(userId);
+  if (negCheck.escalate) {
+    return await handleEscalation({
+      userId, userName, query: userMessage,
+      reason: negCheck.reason,
+      chunks: relevantChunks,
+      history: [],
+    });
+  }
+
+  // 2. Build system prompt
   let systemPrompt;
 
   if (relevantChunks.length > 0) {
@@ -65,31 +93,9 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario') {
   }
 
   // 3. Call DeepSeek V4 Flash
-  const { data } = await axios.post(
-    'https://api.deepseek.com/chat/completions',
-    {
-      model: 'deepseek-v4-flash',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage },
-      ],
-      temperature: 0.7,
-      max_tokens: 800,
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-    }
-  );
-
-  const content = data.choices[0].message.content;
-
-  // V4 Flash may have consumed all tokens on reasoning; retry with more tokens if empty
-  if (!content || content.trim().length === 0) {
-    console.warn('DeepSeek V4 Flash returned empty content, retrying with more tokens');
-    const retry = await axios.post(
+  let content;
+  try {
+    const { data } = await axios.post(
       'https://api.deepseek.com/chat/completions',
       {
         model: 'deepseek-v4-flash',
@@ -98,7 +104,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario') {
           { role: 'user', content: userMessage },
         ],
         temperature: 0.7,
-        max_tokens: 1500,
+        max_tokens: 800,
       },
       {
         headers: {
@@ -107,11 +113,69 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario') {
         },
       }
     );
-    return retry.data.choices[0].message.content ||
-      'Lo siento, no pude procesar tu mensaje. ¿Puedes intentarlo de nuevo?';
+
+    content = data.choices[0].message.content;
+
+    if (!content || content.trim().length === 0) {
+      // Retry with more tokens
+      const retry = await axios.post(
+        'https://api.deepseek.com/chat/completions',
+        {
+          model: 'deepseek-v4-flash',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userMessage },
+          ],
+          temperature: 0.7,
+          max_tokens: 1500,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+      content = retry.data.choices[0].message.content;
+    }
+  } catch (err) {
+    // Case 4: API error
+    return await handleEscalation({
+      userId, userName, query: userMessage,
+      reason: `Error de API: ${err.message}`,
+      chunks: relevantChunks,
+      history: [],
+    });
   }
 
-  return content;
+  if (!content || content.trim().length === 0) {
+    return await handleEscalation({
+      userId, userName, query: userMessage,
+      reason: 'DeepSeek devolvió respuesta vacía después de reintento',
+      chunks: relevantChunks,
+      history: [],
+    });
+  }
+
+  // Successful response — reset negative counter
+  resetNegative(userId);
+
+  return { answer: content, chunks: relevantChunks, escalated: false };
 }
 
-module.exports = { chatWithDeepSeek };
+// ─── Escalation handler ──────────────────────────────────────────────────
+
+async function handleEscalation({ userId, userName, query, reason, chunks, history }) {
+  console.log(`🚨 ESCALANDO — ${reason}`);
+
+  // Send email
+  const sent = await sendEscalationEmail({ userId, userName, query, history, reason, chunks });
+
+  const message = sent
+    ? 'He notificado a nuestro equipo de asesores sobre tu consulta. Te contactarán pronto. ¿Necesitas algo más mientras tanto? 😊'
+    : 'Voy a transferirte con un asesor humano para atenderte mejor. Por favor espera un momento. 🙏';
+
+  return { answer: message, chunks, escalated: true };
+}
+
+module.exports = { chatWithDeepSeek, searchKnowledge };

@@ -73,7 +73,8 @@ app.post('/webhook', async (req, res) => {
       await markAsRead(senderPhone, msg.id);
 
       // Get response from DeepSeek
-      const aiResponse = await chatWithDeepSeek(messageText, senderName);
+      const result = await chatWithDeepSeek(messageText, senderName, senderPhone);
+      const aiResponse = result.answer;
       console.log(`Respuesta DeepSeek: "${aiResponse}"`);
 
       // Save conversation asynchronously (don't block response)
@@ -158,8 +159,8 @@ app.post('/chat', async (req, res) => {
     if (!query) return res.status(400).json({ error: 'query is required' });
 
     console.log(`Chat: "${query.substring(0, 80)}..."`);
-    const answer = await chatWithDeepSeek(query, user_name || 'Usuario');
-    res.json({ query, answer });
+    const result = await chatWithDeepSeek(query, user_name || 'Usuario', user_id || 'web');
+    res.json({ query, answer: result.answer });
   } catch (error) {
     console.error('Chat error:', error.message);
     res.status(500).json({ error: 'Error procesando el mensaje' });
