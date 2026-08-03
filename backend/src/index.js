@@ -11,6 +11,22 @@ const app = express();
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
+// ─── Request logging ────────────────────────────────────────────────────
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    console.log(
+      `[${res.statusCode}] ${req.method} ${req.originalUrl}` +
+      ` | origin=${req.headers.origin || 'none'}` +
+      ` | ${Date.now() - start}ms`
+    );
+    if (res.statusCode >= 400) {
+      console.log(`  → Headers: ${JSON.stringify(req.headers)}`);
+    }
+  });
+  next();
+});
+
 // ─── Webhook verification (GET) ───────────────────────────────────────
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
@@ -81,9 +97,13 @@ const knowledge = axios.create({ baseURL: KNOWLEDGE_URL });
 
 app.get('/sources', async (req, res) => {
   try {
+    console.log(`Proxy → ${KNOWLEDGE_URL}/sources`);
     const { data } = await knowledge.get('/sources');
     res.json(data);
-  } catch (e) { res.status(502).json({ error: 'Knowledge service unreachable' }); }
+  } catch (e) {
+    console.error(`Proxy /sources FAILED: ${e.code || e.message}`);
+    res.status(502).json({ error: 'Knowledge service unreachable' });
+  }
 });
 
 app.get('/sources/:id', async (req, res) => {
@@ -102,9 +122,13 @@ app.post('/ingest', async (req, res) => {
 
 app.get('/health', async (req, res) => {
   try {
+    console.log(`Proxy → ${KNOWLEDGE_URL}/health`);
     const { data } = await knowledge.get('/health');
     res.json(data);
-  } catch (e) { res.status(502).json({ error: 'Knowledge service unreachable' }); }
+  } catch (e) {
+    console.error(`Proxy /health FAILED: ${e.code || e.message}`);
+    res.status(502).json({ error: 'Knowledge service unreachable' });
+  }
 });
 
 // ─── Chat endpoint (for frontend) ─────────────────────────────────────
@@ -113,6 +137,7 @@ app.post('/chat', async (req, res) => {
     const { query, user_id, user_name } = req.body;
     if (!query) return res.status(400).json({ error: 'query is required' });
 
+    console.log(`Chat: "${query.substring(0, 80)}..."`);
     const answer = await chatWithDeepSeek(query, user_name || 'Usuario');
     res.json({ query, answer });
   } catch (error) {

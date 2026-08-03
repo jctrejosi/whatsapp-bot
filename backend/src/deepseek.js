@@ -45,9 +45,11 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario') {
       'REGLAS ESTRICTAS:\n' +
       '- Responde ÚNICAMENTE usando la información del CONTEXTO proporcionado abajo.\n' +
       '- NO inventes información que no aparezca en el CONTEXTO.\n' +
-      '- Si el CONTEXTO no contiene la respuesta, di exactamente: ' +
-      '"No tengo esa información en mi base de conocimiento. ¿Puedo ayudarte con otra pregunta sobre el crucero de Quinceañeras?"\n' +
-      '- NO respondas preguntas que no estén relacionadas con el evento.\n\n' +
+      '- Si el CONTEXTO NO contiene la respuesta exacta a la pregunta:\n' +
+      '  1. Primero dile al usuario que no tienes ese dato específico.\n' +
+      '  2. Luego, sugiérele la información MÁS RELACIONADA que SÍ está en el CONTEXTO.\n' +
+      '     Ejemplo: "No tengo información sobre Cartagena, pero el crucero visita Puerto Plata, San Juan y Ocean Cay."\n' +
+      '- NO respondas preguntas completamente ajenas al evento (ej: capital de Francia, fútbol, etc).\n\n' +
       `CONTEXTO:\n${context}`;
   } else {
     systemPrompt =
