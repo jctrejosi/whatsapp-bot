@@ -3,12 +3,18 @@ const {
   shouldEscalate,
   sendEscalationEmail, checkPendingEscalation, setPendingEscalation, clearPendingEscalation
 } = require('./escalation');
+const { TOOLS, FUNCTION_MAP } = require('./functions');
 
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 const KNOWLEDGE_SERVICE_URL = process.env.KNOWLEDGE_SERVICE_URL || 'http://localhost:8000';
 
 // Conversation history per user (in memory — max 6 messages)
 const conversationHistory = new Map();
+
+const DEEPSEEK_HEADERS = {
+  Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+  'Content-Type': 'application/json',
+};
 
 /**
  * Search the knowledge base for relevant context.
@@ -28,13 +34,68 @@ async function searchKnowledge(query) {
 }
 
 /**
- * Send a message to DeepSeek V4 Flash and handle escalation if needed.
+ * Call DeepSeek with optional function calling.
+ * If the model returns tool_calls, execute them and call again with results.
+ */
+async function callDeepSeek(messages, tools = null) {
+  const body = {
+    model: 'deepseek-v4-flash',
+    messages,
+    temperature: 0.7,
+    max_tokens: 1200,
+  };
+  if (tools) body.tools = tools;
+
+  let { data } = await axios.post('https://api.deepseek.com/chat/completions', body, { headers: DEEPSEEK_HEADERS });
+  const msg = data.choices[0].message;
+
+  // Handle function calling
+  if (msg.tool_calls && msg.tool_calls.length > 0) {
+    console.log(`Function call: ${msg.tool_calls.map(t => t.function.name).join(', ')}`);
+
+    // Execute functions and collect results
+    const toolResults = [];
+    for (const toolCall of msg.tool_calls) {
+      const fn = FUNCTION_MAP[toolCall.function.name];
+      if (fn) {
+        const args = JSON.parse(toolCall.function.arguments || '{}');
+        const result = fn(args);
+        console.log(`  → ${toolCall.function.name}(${JSON.stringify(args)}) = OK`);
+        toolResults.push({
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          content: JSON.stringify(result),
+        });
+      }
+    }
+
+    // Send results back for final response
+    const followUp = [
+      ...messages,
+      { role: 'assistant', content: null, tool_calls: msg.tool_calls },
+      ...toolResults,
+    ];
+
+    const retry = await axios.post(
+      'https://api.deepseek.com/chat/completions',
+      { model: 'deepseek-v4-flash', messages: followUp, temperature: 0.7, max_tokens: 1500 },
+      { headers: DEEPSEEK_HEADERS }
+    );
+
+    return retry.data.choices[0].message;
+  }
+
+  return msg;
+}
+
+/**
+ * Send a message to DeepSeek V4 Flash with function calling and RAG.
  * @returns {Promise<{ answer: string, chunks: Array, escalated: boolean }>}
  */
 async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unknown') {
   let relevantChunks = [];
 
-  // ── Conversation memory (last 6 messages) ─────────────────────────
+  // ── Conversation memory ──────────────────────────────────────────
   if (!conversationHistory.has(userId)) conversationHistory.set(userId, []);
   const history = conversationHistory.get(userId);
 
@@ -64,106 +125,49 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     };
   }
 
-  // 2. Build system prompt
+  // 2. Build messages with RAG context
+  const messages = [];
   let systemPrompt;
 
   if (relevantChunks.length > 0) {
-    const context = relevantChunks
-      .map((c, i) => `[Fuente ${i + 1}]:\n${c.content}`)
-      .join('\n\n---\n\n');
+    const context = relevantChunks.map((c, i) => `[Fuente ${i + 1}]:\n${c.content}`).join('\n\n---\n\n');
 
     systemPrompt =
       'Eres Ana, asesora de Angela\'s Vacations LLC, una agencia boutique con 20 años de experiencia. ' +
-      'Estás ayudando a familias interesadas en el crucero de Quincea\u00f1eras a bordo del MSC World America ' +
+      'Estás ayudando a familias interesadas en el crucero de Quinceañeras a bordo del MSC World America ' +
       '(20-27 marzo 2027).\n\n' +
       (history.length > 0
-        ? 'HISTORIAL DE LA CONVERSACIÓN (ya llevan hablando un rato, NO saludes de nuevo):\n' +
-          history.slice(-6).map((m, i) => `  ${m.role === 'user' ? 'Cliente' : 'Tú (Ana)'}: ${m.text}`).join('\n') + '\n\n'
+        ? 'HISTORIAL:\n' + history.slice(-6).map(m => `  ${m.role === 'user' ? 'Cliente' : 'Tú'}: ${m.text}`).join('\n') + '\n\n'
         : '') +
       'ESTILO DE RESPUESTA:\n' +
-      '- Responde en espa\u00f1ol, con calidez y entusiasmo, como si estuvieras en WhatsApp.\n' +
-      '- S\u00e9 natural, cercana y emp\u00e1tica. Usa emojis ocasionalmente.\n' +
-      '- NUNCA menciones "fuentes", "contexto", "base de conocimiento" ni t\u00e9rminos t\u00e9cnicos.\n' +
-      '- NUNCA digas "seg\u00fan la informaci\u00f3n proporcionada" o frases similares.\n' +
-      '- Responde como una asesora humana que conoce bien el producto.\n' +
-      '- Si ya hay historial, NO vuelvas a saludar ni a presentarte. Contin\u00faa la conversaci\u00f3n donde qued\u00f3.\n\n' +
-      'LO QUE SABES (datos del evento):\n' +
-      `${context}\n\n` +
-      'PUEDES RAZONAR CON ESTOS DATOS:\n' +
-      '- Puedes hacer CÁLCULOS con precios, sumar, multiplicar, distribuir personas en cabinas.\n' +
-      '- Puedes COMPARAR opciones y RECOMENDAR la mejor según las necesidades del cliente.\n' +
-      '- Puedes EXPLICAR el itinerario, qué incluye cada día, qué necesita el cliente.\n' +
-      '- Puedes RESUMIR condiciones, términos, políticas de cancelación.\n' +
-      '- Puedes dar CONSEJOS basados en los datos (ej: qué empacar, a qué hora llegar).\n' +
-      '- Si los datos no alcanzan para responder, puedes hacer SUPOSICIONES RAZONABLES indicando que son sugerencias.\n\n' +
-      'EJEMPLOS DE RAZONAMIENTO:\n' +
-      '"Para 10 personas (5 adultos + 5 menores) en Interior:\n' +
-      '  Cabina 1: 2 adultos + 2 menores = (2×$1,736.26) + (2×$955.26) = $5,383.04\n' +
-      '  Cabina 2: 2 adultos + 2 menores = $5,383.04\n' +
-      '  Cabina 3: 1 adulto + 1 menor = $1,736.26 + $955.26 = $2,691.52\n' +
-      '  TOTAL: $13,457.60"\n\n' +
-      'REGLAS:\n' +
-      '- NO inventes precios, fechas ni condiciones que no estén en los datos.\n' +
-      '- Si te preguntan algo ajeno al evento, responde que solo puedes ayudar con el crucero.';
+      '- Responde en espa\u00f1ol, con calidez y entusiasmo. Usa emojis ocasionalmente.\n' +
+      '- NUNCA menciones "fuentes", "contexto" ni t\u00e9rminos t\u00e9cnicos.\n' +
+      '- Si ya hay historial, NO saludes de nuevo.\n\n' +
+      'CU\u00c1NDO USAR FUNCIONES:\n' +
+      '- Para calcular precios y armar planes de grupo \u2192 usa calcular_plan\n' +
+      '- Para fechas de pago y cancelaciones \u2192 usa obtener_fechas_pago\n' +
+      '- Para la lista de qu\u00e9 incluye el paquete \u2192 usa obtener_que_incluye\n' +
+      '- Para el itinerario d\u00eda por d\u00eda \u2192 usa obtener_itinerario\n' +
+      '- Para TODO lo dem\u00e1s: compara, explica, recomienda, resume usando los DATOS DEL EVENTO.\n\n' +
+      'DATOS DEL EVENTO:\n' + context;
   } else {
     systemPrompt =
-      'Eres Ana, asesora de Angela\'s Vacations LLC. ' +
-      'Responde en espa\u00f1ol, con calidez y naturalidad.\n\n' +
-      (history.length > 0
-        ? 'HISTORIAL DE LA CONVERSACIÓN (ya llevan hablando un rato, NO saludes de nuevo):\n' +
-          history.slice(-6).map((m, i) => `  ${m.role === 'user' ? 'Cliente' : 'Tú (Ana)'}: ${m.text}`).join('\n') + '\n\n'
-        : '') +
-      'En este momento no tienes acceso a la informaci\u00f3n del evento. ' +
-      'Dile al cliente que el sistema est\u00e1 iniciando y que por favor intente de nuevo en unos segundos. ' +
-      'S\u00e9 amable y pide disculpas brevemente. ' +
-      (history.length > 0 ? 'NO saludes de nuevo, ya est\u00e1n en medio de una conversaci\u00f3n.' : '');
+      'Eres Ana, asesora de Angela\'s Vacations LLC. Responde en español, con calidez.\n' +
+      'No tienes acceso a la información. Pide disculpas y sugiere intentar de nuevo.';
   }
 
-  // 3. Call DeepSeek V4 Flash
+  messages.push({ role: 'system', content: systemPrompt });
+  messages.push({ role: 'user', content: userMessage });
+
+  // 3. Call DeepSeek with function calling
   let content;
   try {
-    const { data } = await axios.post(
-      'https://api.deepseek.com/chat/completions',
-      {
-        model: 'deepseek-v4-flash',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage },
-        ],
-        temperature: 0.7,
-        max_tokens: 1200,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-
-    content = data.choices[0].message.content;
+    const msg = await callDeepSeek(messages, TOOLS);
+    content = msg.content;
 
     if (!content || content.trim().length === 0) {
-      // Retry with more tokens
-      const retry = await axios.post(
-        'https://api.deepseek.com/chat/completions',
-        {
-          model: 'deepseek-v4-flash',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userMessage },
-          ],
-          temperature: 0.7,
-          max_tokens: 2000,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-      content = retry.data.choices[0].message.content;
+      const retry = await callDeepSeek(messages, TOOLS);
+      content = retry.content;
     }
   } catch (err) {
     console.error('DeepSeek error:', err.message);
