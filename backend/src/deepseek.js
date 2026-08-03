@@ -7,6 +7,9 @@ const {
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 const KNOWLEDGE_SERVICE_URL = process.env.KNOWLEDGE_SERVICE_URL || 'http://localhost:8000';
 
+// Conversation history per user (in memory — max 6 messages)
+const conversationHistory = new Map();
+
 /**
  * Search the knowledge base for relevant context.
  */
@@ -31,6 +34,10 @@ async function searchKnowledge(query) {
 async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unknown') {
   let relevantChunks = [];
   let error = null;
+
+  // ── Conversation memory (last 6 messages) ─────────────────────────
+  if (!conversationHistory.has(userId)) conversationHistory.set(userId, []);
+  const history = conversationHistory.get(userId);
 
   // ── Check if user is responding to a pending escalation ────────────
   const pendingCheck = checkPendingEscalation(userId, userMessage);
@@ -86,17 +93,27 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
 
     systemPrompt =
       'Eres Ana, asesora de Angela\'s Vacations LLC, una agencia boutique con 20 años de experiencia. ' +
-      'Estás ayudando a familias interesadas en el crucero de Quinceañeras a bordo del MSC World America ' +
+      'Estás ayudando a familias interesadas en el crucero de Quincea\u00f1eras a bordo del MSC World America ' +
       '(20-27 marzo 2027).\n\n' +
+      (history.length > 0
+        ? 'HISTORIAL DE LA CONVERSACIÓN (ya llevan hablando un rato, NO saludes de nuevo):\n' +
+          history.slice(-6).map((m, i) => `  ${m.role === 'user' ? 'Cliente' : 'Tú (Ana)'}: ${m.text}`).join('\n') + '\n\n'
+        : '') +
       'ESTILO DE RESPUESTA:\n' +
-      '- Responde en español, con calidez y entusiasmo, como si estuvieras en WhatsApp.\n' +
-      '- Sé natural, cercana y empática. Usa emojis ocasionalmente.\n' +
-      '- NUNCA menciones "fuentes", "contexto", "base de conocimiento" ni términos técnicos.\n' +
-      '- NUNCA digas "según la información proporcionada" o frases similares.\n' +
-      '- Responde como una asesora humana que conoce bien el producto.\n\n' +
+      '- Responde en espa\u00f1ol, con calidez y entusiasmo, como si estuvieras en WhatsApp.\n' +
+      '- S\u00e9 natural, cercana y emp\u00e1tica. Usa emojis ocasionalmente.\n' +
+      '- NUNCA menciones "fuentes", "contexto", "base de conocimiento" ni t\u00e9rminos t\u00e9cnicos.\n' +
+      '- NUNCA digas "seg\u00fan la informaci\u00f3n proporcionada" o frases similares.\n' +
+      '- Responde como una asesora humana que conoce bien el producto.\n' +
+      '- Si ya hay historial, NO vuelvas a saludar ni a presentarte. Contin\u00faa la conversaci\u00f3n donde qued\u00f3.\n\n' +
       'LO QUE SABES (datos del evento):\n' +
       `${context}\n\n` +
       'REGLAS:\n' +
+      '- Puedes HACER CÁLCULOS y armar planes personalizados usando los precios de arriba.\n' +
+      '- Si el cliente te da número de personas, edades y tipo de cabina, calcula el costo total.\n' +
+      '- Sugiere la distribución de cabinas más eficiente. Máximo 4 personas por cabina.\n' +
+      '- Muestra el desglose: cuánto paga cada grupo (adultos vs menores de 17).\n' +
+      '- Si te faltan datos para calcular (ej: no especificaron tipo de cabina), pregunta.\n' +
       '- Si te preguntan algo que NO está en los datos de arriba, di que no tienes ese detalle ' +
       'pero ofrece información relacionada que SÍ conozcas.\n' +
       '- NO inventes precios, fechas ni condiciones que no estén arriba.\n' +
@@ -104,10 +121,15 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
   } else {
     systemPrompt =
       'Eres Ana, asesora de Angela\'s Vacations LLC. ' +
-      'Responde en español, con calidez y naturalidad.\n\n' +
-      'En este momento no tienes acceso a la información del evento. ' +
-      'Dile al cliente que el sistema está iniciando y que por favor intente de nuevo en unos segundos. ' +
-      'Sé amable y pide disculpas brevemente.';
+      'Responde en espa\u00f1ol, con calidez y naturalidad.\n\n' +
+      (history.length > 0
+        ? 'HISTORIAL DE LA CONVERSACIÓN (ya llevan hablando un rato, NO saludes de nuevo):\n' +
+          history.slice(-6).map((m, i) => `  ${m.role === 'user' ? 'Cliente' : 'Tú (Ana)'}: ${m.text}`).join('\n') + '\n\n'
+        : '') +
+      'En este momento no tienes acceso a la informaci\u00f3n del evento. ' +
+      'Dile al cliente que el sistema est\u00e1 iniciando y que por favor intente de nuevo en unos segundos. ' +
+      'S\u00e9 amable y pide disculpas brevemente. ' +
+      (history.length > 0 ? 'NO saludes de nuevo, ya est\u00e1n en medio de una conversaci\u00f3n.' : '');
   }
 
   // 3. Call DeepSeek V4 Flash
@@ -173,8 +195,11 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     });
   }
 
-  // Successful response — reset negative counter
+  // Successful response — reset negative counter and save to history
   resetNegative(userId);
+  history.push({ role: 'user', text: userMessage.substring(0, 200) });
+  history.push({ role: 'assistant', text: content.substring(0, 300) });
+  if (history.length > 6) history.splice(0, history.length - 6);
 
   return { answer: content, chunks: relevantChunks, escalated: false };
 }
