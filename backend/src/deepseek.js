@@ -33,17 +33,35 @@ async function searchKnowledge(query) {
  */
 async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unknown') {
   let relevantChunks = [];
-  let error = null;
 
   // ── Conversation memory (last 6 messages) ─────────────────────────
   if (!conversationHistory.has(userId)) conversationHistory.set(userId, []);
   const history = conversationHistory.get(userId);
 
+  // ── Escalation: only when user explicitly asks ───────────────────
+  const pendingCheck = checkPendingEscalation(userId, userMessage);
+  if (pendingCheck.pending && pendingCheck.confirm) {
+    sendEscalationEmail(pendingCheck.escalationData);
+    return {
+      answer: '¡Listo! Ya notifiqué a nuestro equipo. Te contactarán pronto. ¿Necesitas algo más mientras tanto? 😊',
+      chunks: [], escalated: true,
+    };
+  }
+
   // 1. Retrieve relevant knowledge
   try {
     relevantChunks = await searchKnowledge(userMessage);
   } catch (err) {
-    error = err.message;
+    console.error('Search error:', err.message);
+  }
+
+  // ── Check if user wants an advisor ──────────────────────────────
+  if (shouldEscalate(userId, userMessage, relevantChunks).escalate) {
+    setPendingEscalation(userId, { userId, userName, query: userMessage, reason: 'Cliente solicitó asesor' });
+    return {
+      answer: '¿Quieres que le notifique a uno de nuestros asesores para que te contacte personalmente? Responde "sí" para enviar la notificación o "no" para continuar. 😊',
+      chunks: relevantChunks, escalated: false,
+    };
   }
 
   // 2. Build system prompt

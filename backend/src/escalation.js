@@ -29,10 +29,7 @@ const ESCALATION_KEYWORDS = [
 // ─── Main escalation check ───────────────────────────────────────────────
 
 /**
- * Check if the conversation should be escalated to a human.
- * Two cases only:
- *   1. User explicitly asks for an advisor (keywords)
- *   2. User asks something unknown 3+ times in a row
+ * Check if the user is explicitly asking for a human advisor.
  */
 function shouldEscalate(userId, query, chunks) {
   const queryLower = query.toLowerCase().trim();
