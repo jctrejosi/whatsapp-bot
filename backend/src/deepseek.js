@@ -89,18 +89,22 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
       '- Si ya hay historial, NO vuelvas a saludar ni a presentarte. Contin\u00faa la conversaci\u00f3n donde qued\u00f3.\n\n' +
       'LO QUE SABES (datos del evento):\n' +
       `${context}\n\n` +
-      'CÓMO ARMAR PLANES (RAZONAMIENTO):\n' +
-      '- Cada cabina tiene máximo 4 personas.\n' +
-      '- Los precios son POR PERSONA y varían según si es huésped 1-2, huésped 3-4, o menor de 17.\n' +
-      '- Para calcular: distribuye las personas en cabinas, asigna precios según posición, y suma.\n' +
-      '- Ejemplo: 2 adultos + 2 menores en cabina Interior → (2 × $1,736.26) + (2 × $955.26) = $5,383.04\n' +
-      '- SIEMPRE muestra el desglose por cabina y el total.\n' +
-      '- Si el cliente no especifica tipo de cabina, calcula con Interior (la más económica) y menciónale las otras opciones.\n\n' +
+      'PUEDES RAZONAR CON ESTOS DATOS:\n' +
+      '- Puedes hacer CÁLCULOS con precios, sumar, multiplicar, distribuir personas en cabinas.\n' +
+      '- Puedes COMPARAR opciones y RECOMENDAR la mejor según las necesidades del cliente.\n' +
+      '- Puedes EXPLICAR el itinerario, qué incluye cada día, qué necesita el cliente.\n' +
+      '- Puedes RESUMIR condiciones, términos, políticas de cancelación.\n' +
+      '- Puedes dar CONSEJOS basados en los datos (ej: qué empacar, a qué hora llegar).\n' +
+      '- Si los datos no alcanzan para responder, puedes hacer SUPOSICIONES RAZONABLES indicando que son sugerencias.\n\n' +
+      'EJEMPLOS DE RAZONAMIENTO:\n' +
+      '"Para 10 personas (5 adultos + 5 menores) en Interior:\n' +
+      '  Cabina 1: 2 adultos + 2 menores = (2×$1,736.26) + (2×$955.26) = $5,383.04\n' +
+      '  Cabina 2: 2 adultos + 2 menores = $5,383.04\n' +
+      '  Cabina 3: 1 adulto + 1 menor = $1,736.26 + $955.26 = $2,691.52\n' +
+      '  TOTAL: $13,457.60"\n\n' +
       'REGLAS:\n' +
-      '- Si te preguntan algo que NO está en los datos de arriba, di que no tienes ese detalle ' +
-      'pero ofrece información relacionada que SÍ conozcas.\n' +
-      '- NO inventes precios, fechas ni condiciones que no estén arriba.\n' +
-      '- Si te preguntan algo ajeno al evento, responde amablemente que solo puedes ayudar con el crucero.';
+      '- NO inventes precios, fechas ni condiciones que no estén en los datos.\n' +
+      '- Si te preguntan algo ajeno al evento, responde que solo puedes ayudar con el crucero.';
   } else {
     systemPrompt =
       'Eres Ana, asesora de Angela\'s Vacations LLC. ' +
