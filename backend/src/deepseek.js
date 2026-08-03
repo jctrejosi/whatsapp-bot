@@ -1,6 +1,6 @@
 const axios = require('axios');
 const {
-  shouldEscalate, trackNegative, resetNegative, wasAnswerClear,
+  shouldEscalate,
   sendEscalationEmail, checkPendingEscalation, setPendingEscalation, clearPendingEscalation
 } = require('./escalation');
 
@@ -183,13 +183,6 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
       reason: 'DeepSeek devolvió respuesta vacía después de reintento',
       chunks: relevantChunks,
     });
-  }
-
-  // Track negative or reset based on answer quality
-  if (wasAnswerClear(relevantChunks)) {
-    resetNegative(userId);
-  } else {
-    trackNegative(userId);
   }
 
   // Save to history

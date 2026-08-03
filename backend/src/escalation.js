@@ -37,17 +37,9 @@ const ESCALATION_KEYWORDS = [
 function shouldEscalate(userId, query, chunks) {
   const queryLower = query.toLowerCase().trim();
 
-  // Case 1: User explicitly asks for an advisor
+  // Only escalate when the user explicitly asks for a human
   if (ESCALATION_KEYWORDS.some(kw => queryLower.includes(kw))) {
-    resetNegative(userId);
     return { escalate: true, reason: 'El usuario solicitó hablar con un asesor' };
-  }
-
-  // Case 2: Check negative threshold
-  const count = negativeCounts.get(userId) || 0;
-  if (count >= MAX_NEGATIVE) {
-    resetNegative(userId);
-    return { escalate: true, reason: `${count} preguntas sin respuesta clara consecutivas` };
   }
 
   return { escalate: false, reason: '' };
