@@ -101,7 +101,7 @@ const EMAIL_TYPES = {
  *   type: 'advisor' (default) | 'sales' | 'test'
  * @returns {Promise<{ ok: boolean, results: Array, skipped?: boolean }>}
  */
-async function sendEscalationEmail({ userId, userName, query, history, reason, type = 'advisor' }) {
+async function sendEscalationEmail({ userId, userName, query, history, reason, type = 'advisor', botId }) {
   // Cooldown por usuario: evita correos duplicados cuando el modelo llama
   // iniciar_cierre_venta más de una vez en la misma conversación
   const now = Date.now();
@@ -110,7 +110,7 @@ async function sendEscalationEmail({ userId, userName, query, history, reason, t
     return { ok: true, results: [], skipped: true };
   }
 
-  const { escalationEmails, senderEmail, resendApiKey } = getSettings();
+  const { escalationEmails, senderEmail, resendApiKey } = getSettings(botId);
 
   const meta = EMAIL_TYPES[type] || EMAIL_TYPES.advisor;
 

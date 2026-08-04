@@ -7,6 +7,7 @@ const { chatWithDeepSeek } = require('./deepseek');
 const { getSettings, updateSettings, resetSettings } = require('./settings');
 const { sendEscalationEmail } = require('./escalation');
 const { getLogs } = require('./logger');
+const { listBots, createBot, deleteBot, updateBot } = require('./bot-manager');
 
 const app = express();
 
@@ -167,67 +168,172 @@ app.get('/logs', (req, res) => {
   res.json({ count: Math.min(limit, getLogs().length), logs: getLogs().slice(0, limit) });
 });
 
-// ─── Settings (admin dashboard) ─────────────────────────────────────────
+// ─── Bots (multi-bot platform) ────────────────────────────────────────
 
-// GET /settings — current configuration
-app.get('/settings', (req, res) => {
-  res.json(getSettings());
+app.get('/bots', (req, res) => {
+  res.json(listBots());
 });
 
-// PUT /settings — validate and apply a subset of settings
-app.put('/settings', (req, res) => {
+app.post('/bots', (req, res) => {
   try {
-    res.json(updateSettings(req.body || {}));
+    const { name, description } = req.body || {};
+    if (!name || !name.trim()) return res.status(400).json({ error: 'name es requerido' });
+    const result = createBot({ name, description });
+    res.status(201).json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/bots/:id', (req, res) => {
+  try {
+    res.json(updateBot(req.params.id, req.body || {}));
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+app.delete('/bots/:id', (req, res) => {
+  try {
+    deleteBot(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+// ─── Per-bot settings ─────────────────────────────────────────────────
+
+app.get('/bots/:id/settings', (req, res) => {
+  res.json(getSettings(req.params.id));
+});
+
+app.put('/bots/:id/settings', (req, res) => {
+  try {
+    res.json(updateSettings(req.params.id, req.body || {}));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
-// POST /settings/reset — back to env vars / defaults
-app.post('/settings/reset', (req, res) => {
-  try {
-    res.json(resetSettings());
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+app.post('/bots/:id/settings/reset', (req, res) => {
+  res.json(resetSettings(req.params.id));
 });
 
-// POST /settings/test-email — send a test escalation email to all advisors
-app.post('/settings/test-email', async (req, res) => {
+app.post('/bots/:id/settings/test-email', async (req, res) => {
   try {
     const result = await sendEscalationEmail({
       userId: 'test',
       userName: 'Prueba de configuración',
-      query: 'Este es un correo de prueba enviado desde el panel de configuración.',
+      query: 'Correo de prueba desde el panel de configuración.',
       history: [],
       reason: 'Prueba de configuración del bot',
+      botId: req.params.id,
     });
-    if (result.ok) {
-      res.json(result);
-    } else {
-      res.status(502).json({
-        error: result.error || 'No se pudo enviar el correo',
-        results: result.results,
-      });
-    }
+    if (result.ok) res.json(result);
+    else res.status(502).json({ error: result.error || 'No se pudo enviar', results: result.results });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ─── Chat endpoint (for frontend) ─────────────────────────────────────
+// ─── Per-bot knowledge ─────────────────────────────────────────────
+
+app.get('/bots/:id/knowledge', async (req, res) => {
+  try {
+    const { data } = await knowledge.get('/sources', { params: { bot_id: req.params.id } });
+    res.json(data);
+  } catch (e) { res.status(502).json({ error: knowledgeError('/sources') }); }
+});
+
+app.post('/bots/:id/knowledge/upload', async (req, res) => {
+  try {
+    const multer = require('multer');
+    const upload = multer({ storage: multer.memoryStorage() }).single('file');
+    upload(req, res, async (err) => {
+      if (err) return res.status(400).json({ error: err.message });
+      if (!req.file) return res.status(400).json({ error: 'file is required' });
+
+      // 1. Subir a Cloudinary
+      const { uploadBuffer } = require('./cloudinary');
+      const cloudResult = await uploadBuffer(req.file.buffer, {
+        folder: `bots/${req.params.id}`,
+        original_filename: req.file.originalname,
+      });
+
+      // 2. Enviar al knowledge-service para extracción + chunking + embeddings
+      const FormData = require('form-data');
+      const form = new FormData();
+      form.append('file', req.file.buffer, { filename: req.file.originalname, contentType: req.file.mimetype });
+      if (req.params.id) form.append('bot_id', req.params.id);
+      const { data } = await axios.post(`${KNOWLEDGE_URL}/ingest`, form, {
+        headers: { ...form.getHeaders() },
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+      });
+
+      res.json({ ...data, cloudinary_url: cloudResult.url });
+    });
+  } catch (e) { res.status(502).json({ error: knowledgeError('/ingest') }); }
+});
+
+app.delete('/bots/:id/knowledge/:sourceId', async (req, res) => {
+  try {
+    await knowledge.delete(`/sources/${req.params.sourceId}`);
+    res.json({ ok: true });
+  } catch (e) { res.status(502).json({ error: knowledgeError('/sources') }); }
+});
+
+app.post('/bots/:id/chat', async (req, res) => {
+  try {
+    const { query, user_id, user_name } = req.body;
+    if (!query) return res.status(400).json({ error: 'query is required' });
+    const result = await chatWithDeepSeek(query, user_name || 'Usuario', user_id || 'web', req.params.id);
+    res.json({ query, answer: result.answer, chunks_used: result.chunks });
+  } catch (err) {
+    console.error('Chat error:', err.message);
+    res.status(500).json({ error: 'Error procesando' });
+  }
+});
+
+// ─── Global settings (backward compat + global defaults) ────────────────
+// ─── Global settings (backward compat + global defaults) ────────────────
+
+// GET /settings — current global configuration
+app.get('/settings', (req, res) => { res.json(getSettings()); });
+
+// PUT /settings — validate and apply a subset of global settings
+app.put('/settings', (req, res) => {
+  try { res.json(updateSettings(null, req.body || {})); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// POST /settings/reset
+app.post('/settings/reset', (req, res) => {
+  try { res.json(resetSettings()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /settings/test-email
+app.post('/settings/test-email', async (req, res) => {
+  try {
+    const result = await sendEscalationEmail({
+      userId: 'test', userName: 'Prueba', query: 'Correo de prueba.',
+      history: [], reason: 'Prueba de configuración',
+    });
+    if (result.ok) res.json(result);
+    else res.status(502).json({ error: result.error || 'No se pudo enviar', results: result.results });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── Chat endpoint (global, backward compat) ───────────────────────────
 app.post('/chat', async (req, res) => {
   try {
     const { query, user_id, user_name } = req.body;
     if (!query) return res.status(400).json({ error: 'query is required' });
-
-    console.log(`Chat: "${query.substring(0, 80)}..."`);
     const result = await chatWithDeepSeek(query, user_name || 'Usuario', user_id || 'web');
-    res.json({ query, answer: result.answer });
-  } catch (error) {
-    console.error('Chat error:', error.message);
-    res.status(500).json({ error: 'Error procesando el mensaje' });
-  }
+    res.json({ query, answer: result.answer, chunks_used: result.chunks });
+  } catch (err) { res.status(500).json({ error: 'Error procesando' }); }
 });
 
 // ─── Health check ─────────────────────────────────────────────────────

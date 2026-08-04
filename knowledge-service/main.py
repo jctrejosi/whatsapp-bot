@@ -16,7 +16,7 @@ import tempfile
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile, Form
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -110,11 +110,11 @@ class ChatResponse(BaseModel):
 # ─── Routes ──────────────────────────────────────────────────────────────────
 
 @app.post("/ingest", status_code=201)
-async def ingest_pdf(file: UploadFile = File(...)):
+@app.post("/ingest")
+async def ingest_pdf(file: UploadFile = File(...), bot_id: str = Form(None)):
     """
     Upload a PDF file and trigger the full ingestion pipeline:
     extract → chunk → embed → store in pgvector.
-    The file is processed in memory — nothing is saved to disk.
     """
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(400, "Solo se aceptan archivos PDF")
@@ -135,11 +135,10 @@ async def ingest_pdf(file: UploadFile = File(...)):
         source_id = uuid.uuid4()
         await conn.execute(
             """
-            INSERT INTO knowledge_sources
-                (id, source_type, title, description,
+            INSERT INTO knowledge_sources (id, source_type, title, description,
                  original_filename, file_path, file_type, file_size_bytes,
-                 status, metadata)
-            VALUES ($1, 'file', $2, $3, $4, $5, $6, $7, 'pending', $8)
+                 status, metadata, bot_id)
+            VALUES ($1, 'file', $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
             """,
             source_id,
             extract_result.metadata.get("title") or file.filename,
@@ -149,6 +148,7 @@ async def ingest_pdf(file: UploadFile = File(...)):
             file.content_type or "application/pdf",
             len(contents),
             json.dumps({"pdf_metadata": extract_result.metadata} if extract_result.metadata else {}),
+            bot_id,
         )
 
     # Create ingestion job
@@ -197,19 +197,23 @@ async def _safe_ingest(job_id: str):
 
 
 @app.get("/sources")
-async def list_sources(status: Optional[str] = None):
-    """List all knowledge sources, optionally filtered by status."""
+async def list_sources(status: Optional[str] = None, bot_id: Optional[str] = None):
+    """List all knowledge sources, optionally filtered by status and bot_id."""
     pool = await get_pool()
     async with pool.acquire() as conn:
+        params = []
+        where = []
         if status:
-            rows = await conn.fetch(
-                "SELECT * FROM knowledge_sources WHERE status = $1 ORDER BY created_at DESC",
-                status,
-            )
-        else:
-            rows = await conn.fetch(
-                "SELECT * FROM knowledge_sources ORDER BY created_at DESC"
-            )
+            where.append(f"status = ${len(params)+1}")
+            params.append(status)
+        if bot_id:
+            where.append(f"bot_id = ${len(params)+1}")
+            params.append(bot_id)
+        sql = "SELECT * FROM knowledge_sources"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY created_at DESC"
+        rows = await conn.fetch(sql, *params)
 
     return [
         {

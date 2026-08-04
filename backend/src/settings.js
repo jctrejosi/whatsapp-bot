@@ -31,6 +31,15 @@ function envDefaults() {
     // API key de Resend (también configurable desde env: RESEND_API_KEY)
     resendApiKey: process.env.RESEND_API_KEY || '',
 
+    // WhatsApp (por bot, hereda del env global si no se configura)
+    whatsappAppId: process.env.WHATSAPP_APP_ID || '',
+    whatsappAppSecret: process.env.WHATSAPP_APP_SECRET || '',
+    whatsappWabaId: process.env.WHATSAPP_WABA_ID || '',
+    whatsappPhoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
+    whatsappAccessToken: process.env.WHATSAPP_ACCESS_TOKEN || '',
+    whatsappVerifyToken: process.env.WHATSAPP_VERIFY_TOKEN || '',
+    whatsappPhone: process.env.WHATSAPP_PHONE || '',
+
     // Similitud mínima (0-1) para considerar un fragmento relevante en la búsqueda
     minConfidence: parseFloat(process.env.MIN_CONFIDENCE || '0'),
 
@@ -72,59 +81,80 @@ const VALIDATORS = {
   maxHistoryMessages: (v) => Number.isInteger(v) && v >= 1 && v <= 30,
   useReranker: (v) => typeof v === 'boolean',
   resendApiKey: (v) => typeof v === 'string',
+  whatsappAppId: (v) => typeof v === 'string',
+  whatsappAppSecret: (v) => typeof v === 'string',
+  whatsappWabaId: (v) => typeof v === 'string',
+  whatsappPhoneNumberId: (v) => typeof v === 'string',
+  whatsappAccessToken: (v) => typeof v === 'string',
+  whatsappVerifyToken: (v) => typeof v === 'string',
+  whatsappPhone: (v) => typeof v === 'string',
 };
 
-let settings;
+const settingsCache = new Map(); // key: botId || '__global__'
 
-function load() {
+function getSettingsFile(botId) {
+  if (botId) return path.join(DATA_DIR, `bot-${botId}`, 'settings.json');
+  return SETTINGS_FILE;
+}
+
+function load(botId) {
+  const file = getSettingsFile(botId);
   try {
-    if (fs.existsSync(SETTINGS_FILE)) {
-      const file = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
-      return { ...envDefaults(), ...file };
+    if (fs.existsSync(file)) {
+      return { ...envDefaults(), ...JSON.parse(fs.readFileSync(file, 'utf8')) };
     }
   } catch (err) {
-    console.warn('No se pudo leer data/settings.json, usando defaults:', err.message);
+    console.warn(`No se pudo leer ${file}, usando defaults:`, err.message);
   }
   return envDefaults();
 }
 
-function persist() {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+function persist(botId, data) {
+  const file = getSettingsFile(botId);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(data, null, 2));
 }
 
+function cacheKey(botId) { return botId || '__global__'; }
+
 /** Copia de los settings actuales (nunca una referencia mutable). */
-function getSettings() {
-  if (!settings) settings = load();
-  return { ...settings };
+function getSettings(botId) {
+  const key = cacheKey(botId);
+  if (!settingsCache.has(key)) settingsCache.set(key, load(botId));
+  return { ...settingsCache.get(key) };
 }
 
 /** Aplica y persiste un subconjunto de settings. Lanza Error si algo es inválido. */
-function updateSettings(patch = {}) {
-  if (!settings) settings = load();
-  const next = { ...settings };
+function updateSettings(botId, patch = {}) {
+  const key = cacheKey(botId);
+  const current = getSettings(botId);
+  const next = { ...current };
 
-  for (const [key, value] of Object.entries(patch)) {
-    if (!(key in VALIDATORS)) throw new Error(`Parámetro desconocido: ${key}`);
-    if (!VALIDATORS[key](value)) throw new Error(`Valor inválido para "${key}"`);
-
-    next[key] = key === 'escalationEmails' ? value.map((e) => e.trim()) : value;
+  for (const [k, v] of Object.entries(patch)) {
+    if (!(k in VALIDATORS)) throw new Error(`Parámetro desconocido: ${k}`);
+    if (!VALIDATORS[k](v)) throw new Error(`Valor inválido para "${k}"`);
+    next[k] = k === 'escalationEmails' ? v.map((e) => e.trim()) : v;
   }
 
-  settings = next;
-  persist();
-  return getSettings();
+  settingsCache.set(key, next);
+  persist(botId, next);
+  return getSettings(botId);
 }
 
 /** Elimina el archivo y vuelve a env vars / defaults. */
-function resetSettings() {
+function resetSettings(botId) {
   try {
-    fs.rmSync(SETTINGS_FILE, { force: true });
+    fs.rmSync(getSettingsFile(botId), { force: true });
   } catch (err) {
-    console.warn('No se pudo eliminar data/settings.json:', err.message);
+    console.warn(`No se pudo eliminar archivo de settings:`, err.message);
   }
-  settings = envDefaults();
-  return getSettings();
+  settingsCache.delete(cacheKey(botId));
+  return getSettings(botId);
 }
 
-module.exports = { getSettings, updateSettings, resetSettings, SETTINGS_FILE };
+/** Limpia la caché de settings para un bot (al eliminarlo). */
+function clearSettingsCache(botId) {
+  settingsCache.delete(cacheKey(botId));
+}
+
+module.exports = { getSettings, updateSettings, resetSettings, clearSettingsCache, SETTINGS_FILE };

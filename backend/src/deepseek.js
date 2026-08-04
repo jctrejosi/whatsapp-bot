@@ -21,8 +21,8 @@ const DEEPSEEK_HEADERS = {
 /**
  * Search the knowledge base for relevant context.
  */
-async function searchKnowledge(query) {
-  const { topK, useReranker, minConfidence } = getSettings();
+async function searchKnowledge(query, botId) {
+  const { topK, useReranker, minConfidence } = getSettings(botId);
   try {
     const { data } = await axios.post(
       `${KNOWLEDGE_SERVICE_URL}/search`,
@@ -40,8 +40,8 @@ async function searchKnowledge(query) {
  * Call DeepSeek with optional function calling.
  * If the model returns tool_calls, execute them and call again with results.
  */
-async function callDeepSeek(messages, tools = null, attempt = 1) {
-  const { temperature, maxTokens, model } = getSettings();
+async function callDeepSeek(messages, tools = null, attempt = 1, botId) {
+  const { temperature, maxTokens, model } = getSettings(botId);
   // Escala: primer intento = maxTokens; 2º = x1.7; 3º = x2.5
   const tokens = Math.round(maxTokens * (attempt === 1 ? 1 : attempt === 2 ? 1.7 : 2.5));
 
@@ -92,7 +92,7 @@ async function callDeepSeek(messages, tools = null, attempt = 1) {
       ...toolResults,
     ];
 
-    const { model, maxTokens } = getSettings();
+    const { model, maxTokens } = getSettings(botId);
     const retry = await axios.post(
       'https://api.deepseek.com/chat/completions',
       { model, messages: followUp, temperature: 0.7, max_tokens: Math.max(2500, maxTokens) },
@@ -114,12 +114,13 @@ async function callDeepSeek(messages, tools = null, attempt = 1) {
  * Send a message to DeepSeek V4 Flash with function calling and RAG.
  * @returns {Promise<{ answer: string, chunks: Array, escalated: boolean }>}
  */
-async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unknown') {
+async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unknown', botId) {
   let relevantChunks = [];
 
-  // ── Conversation memory ──────────────────────────────────────────
-  if (!conversationHistory.has(userId)) conversationHistory.set(userId, []);
-  const history = conversationHistory.get(userId);
+  // ── Conversation memory (per bot) ─────────────────────────────────
+  const convKey = `${botId || 'global'}::${userId}`;
+  if (!conversationHistory.has(convKey)) conversationHistory.set(convKey, []);
+  const history = conversationHistory.get(convKey);
 
   // Snapshot de la conversación (incluye el mensaje actual) para el correo al asesor
   const historySnapshot = [...history, { role: 'user', text: userMessage }];
@@ -127,7 +128,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
   // ── Escalation: only when user explicitly asks ───────────────────
   const pendingCheck = checkPendingEscalation(userId, userMessage);
   if (pendingCheck.pending && pendingCheck.confirm) {
-    const emailResult = await sendEscalationEmail(pendingCheck.escalationData);
+    const emailResult = await sendEscalationEmail({ ...pendingCheck.escalationData, botId });
     return {
       answer: emailResult.ok
         ? '¡Listo! Ya notifiqué a nuestro equipo. Te contactarán pronto. ¿Necesitas algo más mientras tanto? 😊'
@@ -138,13 +139,13 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
 
   // 1. Retrieve relevant knowledge
   try {
-    relevantChunks = await searchKnowledge(userMessage);
+    relevantChunks = await searchKnowledge(userMessage, botId);
   } catch (err) {
     console.error('Search error:', err.message);
   }
 
   // ── Negative-response tracking (offers an advisor after N unclear answers) ──
-  const { maxNegativeResponses } = getSettings();
+  const { maxNegativeResponses } = getSettings(botId);
   if (wasAnswerClear(relevantChunks)) {
     resetNegative(userId);
   } else if (maxNegativeResponses > 0) {
@@ -169,6 +170,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
       userId, userName, query: userMessage,
       reason: 'Cliente solicitó asesor',
       history: historySnapshot,
+      botId,
     });
     return {
       answer: emailResult.ok
@@ -213,7 +215,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
   messages.push({ role: 'system', content: systemPrompt });
 
   // Historial previo como turnos reales de mensajes (contexto para el modelo)
-  const { maxHistoryMessages } = getSettings();
+  const { maxHistoryMessages } = getSettings(botId);
   for (const m of history.slice(-maxHistoryMessages)) {
     messages.push({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text });
   }
@@ -224,7 +226,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
   let content;
   let escalated = false;
   try {
-    const msg = await callDeepSeek(messages, TOOLS);
+    const msg = await callDeepSeek(messages, TOOLS, 1, botId);
     content = msg.content;
     if (msg._escalate) {
       escalated = true;
@@ -244,6 +246,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
         reason,
         history: historySnapshot,
         type: 'sales',
+        botId,
       });
     }
   } catch (err) {

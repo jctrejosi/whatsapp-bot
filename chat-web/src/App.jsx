@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { chat, getSources, getSource, ingestPdf, healthCheck, getSettings, updateSettings, resetSettings, sendTestEmail } from './api.js';
+import { chat, getBots, createBot, deleteBot, updateBot, healthCheck, getSettings, updateSettings, resetSettings, sendTestEmail, getBotSettings, updateBotSettings, resetBotSettings, sendBotTestEmail, botChat, getBotKnowledge, uploadBotFile, deleteBotSource } from './api.js';
 
 /* ─── Message Bubble ──────────────────── */
 function MessageBubble({ msg }) {
@@ -50,7 +50,7 @@ function TypingIndicator() {
 }
 
 /* ─── Chat Panel ──────────────────────── */
-function ChatPanel({ online }) {
+function ChatPanel({ online, botId }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -63,13 +63,15 @@ function ChatPanel({ online }) {
     messagesEnd.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
 
+  const chatFn = botId ? (q) => botChat(botId, q) : (q) => chat(q);
+
   useEffect(() => scrollToBottom(), [messages, loading]);
 
   const sendOne = useCallback(async (text) => {
     sending.current = true;
     setLoading(true);
     try {
-      const data = await chat(text);
+      const data = await chatFn(text);
       setMessages((prev) => [
         ...prev,
         { role: 'bot', text: data.answer, chunks: data.chunks_used || [] },
@@ -80,7 +82,7 @@ function ChatPanel({ online }) {
       setLoading(false);
       sending.current = false;
     }
-  }, []);
+  }, [chatFn]);
 
   // When the bot finishes a response, send the next queued message (if any)
   useEffect(() => {
@@ -372,22 +374,32 @@ function SliderRow({ label, hint, value, min, max, step, onChange }) {
   );
 }
 
-function SettingsPanel({ open, onClose }) {
+function SettingsPanel({ open, onClose, botId }) {
   const [settings, setSettings] = useState(null);
   const [newEmail, setNewEmail] = useState('');
   const [msg, setMsg] = useState('');
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState('');
+  const [tab, setTab] = useState('general');
+  // Knowledge tab
+  const [sources, setSources] = useState([]);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setMsg('');
     setTestResult('');
-    getSettings()
+    setTab('general');
+    const fetchSettings = botId ? getBotSettings(botId) : getSettings();
+    fetchSettings
       .then(setSettings)
       .catch((e) => setMsg('❌ No se pudo cargar: ' + e.message));
-  }, [open]);
+    // Cargar fuentes de conocimiento si hay botId
+    if (botId) {
+      getBotKnowledge(botId).then(setSources).catch(() => {});
+    }
+  }, [open, botId]);
 
   if (!open || !settings) return null;
 
@@ -408,11 +420,39 @@ function SettingsPanel({ open, onClose }) {
     setMsg('');
   };
 
+  const handleUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !botId) return;
+    setUploading(true);
+    setMsg('');
+    try {
+      await uploadBotFile(botId, file);
+      setMsg('✅ Archivo subido. Procesando...');
+      // Refrescar lista tras un momento
+      setTimeout(async () => {
+        try { setSources(await getBotKnowledge(botId)); } catch {}
+        setMsg('');
+      }, 3000);
+    } catch (err) {
+      setMsg('❌ ' + err.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDeleteSource = async (sourceId) => {
+    if (!botId || !window.confirm('¿Eliminar esta fuente de conocimiento?')) return;
+    try {
+      await deleteBotSource(botId, sourceId);
+      setSources((prev) => prev.filter((s) => s.id !== sourceId));
+    } catch (e) { alert('Error: ' + e.message); }
+  };
+
   const save = async () => {
     setSaving(true);
     setMsg('');
     try {
-      setSettings(await updateSettings(settings));
+      setSettings(botId ? await updateBotSettings(botId, settings) : await updateSettings(settings));
       onClose();
     } catch (e) {
       setMsg('❌ ' + e.message);
@@ -426,7 +466,7 @@ function SettingsPanel({ open, onClose }) {
     setSaving(true);
     setMsg('');
     try {
-      setSettings(await resetSettings());
+      setSettings(botId ? await resetBotSettings(botId) : await resetSettings());
       setMsg('✅ Valores restablecidos');
     } catch (e) {
       setMsg('❌ ' + e.message);
@@ -439,7 +479,7 @@ function SettingsPanel({ open, onClose }) {
     setTesting(true);
     setTestResult('');
     try {
-      const res = await sendTestEmail();
+      const res = botId ? await sendBotTestEmail(botId) : await sendTestEmail();
       if (res.ok) {
         setTestResult('✅ Correo enviado a: ' + res.results.map((r) => r.to).join(', '));
       } else {
@@ -461,6 +501,14 @@ function SettingsPanel({ open, onClose }) {
           <button className="btn btn-secondary btn-sm" onClick={onClose}>✕</button>
         </div>
         <div className="modal-body">
+          <div className="settings-tabs">
+            <button className={`tab-btn${tab === 'general' ? ' active' : ''}`} onClick={() => setTab('general')}>⚙️ General</button>
+            <button className={`tab-btn${tab === 'knowledge' ? ' active' : ''}`} onClick={() => setTab('knowledge')}>📚 Conocimiento</button>
+            <button className={`tab-btn${tab === 'whatsapp' ? ' active' : ''}`} onClick={() => setTab('whatsapp')}>📱 WhatsApp</button>
+          </div>
+
+          {tab === 'general' && (
+            <>
           <div className="settings-section">
             <h3>📧 Notificación a asesores</h3>
             <p className="settings-hint">
@@ -587,6 +635,68 @@ function SettingsPanel({ open, onClose }) {
               <span>Usar reranker (DeepSeek V4 Pro) en la búsqueda</span>
             </label>
           </div>
+            </>
+          )}
+
+          {tab === 'knowledge' && (
+            <>
+              <div className="settings-section">
+                <h3>📁 Archivos cargados ({sources.length})</h3>
+                {sources.length === 0 && (
+                  <p className="settings-hint">No hay archivos. Sube un PDF para entrenar al bot.</p>
+                )}
+                {sources.map((s) => (
+                  <div key={s.id} className="source-row">
+                    <div>
+                      <div style={{ fontSize: 13 }}>{s.title || s.original_filename}</div>
+                      <div style={{ fontSize: 11, color: 'var(--gray-200)' }}>
+                        {s.status} · {s.file_type} {s.file_size_bytes ? `· ${(s.file_size_bytes / 1024).toFixed(1)} KB` : ''}
+                      </div>
+                    </div>
+                    <button className="btn btn-secondary btn-sm" onClick={() => handleDeleteSource(s.id)}>🗑️</button>
+                  </div>
+                ))}
+              </div>
+              <div className="settings-section">
+                <label className="btn btn-primary btn-block" style={{ cursor: 'pointer', textAlign: 'center', display: 'block' }}>
+                  {uploading ? '⏳ Subiendo...' : '📤 Subir PDF'}
+                  <input type="file" accept=".pdf" style={{ display: 'none' }} onChange={handleUpload} disabled={uploading} />
+                </label>
+              </div>
+              <div className="settings-section">
+                <h3>🔍 Búsqueda (RAG)</h3>
+                <SliderRow label="Fragmentos (top_k)" hint="Fragmentos usados por respuesta." value={settings.topK} min={1} max={10} step={1} onChange={(v) => set('topK', v)} />
+                <SliderRow label="Confianza mínima" hint="Similitud mínima para considerar un fragmento." value={settings.minConfidence} min={0} max={1} step={0.05} onChange={(v) => set('minConfidence', v)} />
+                <label className="toggle-row">
+                  <input type="checkbox" checked={settings.useReranker} onChange={(e) => set('useReranker', e.target.checked)} />
+                  <span>Usar reranker</span>
+                </label>
+              </div>
+            </>
+          )}
+
+          {tab === 'whatsapp' && (
+            <>
+              <div className="settings-section">
+                <h3>🔗 Conexión WhatsApp</h3>
+                <p className="settings-hint">Configura las credenciales de Meta for Developers para este bot.</p>
+                <label className="settings-label">App ID</label>
+                <input className="bot-name-input" type="text" placeholder="123456789" value={settings.whatsappAppId} onChange={(e) => set('whatsappAppId', e.target.value)} style={{ marginBottom: 8, width: '100%' }} />
+                <label className="settings-label">App Secret</label>
+                <input className="bot-name-input" type="password" placeholder="••••••••" value={settings.whatsappAppSecret} onChange={(e) => set('whatsappAppSecret', e.target.value)} style={{ marginBottom: 8, width: '100%' }} />
+                <label className="settings-label">WABA ID</label>
+                <input className="bot-name-input" type="text" placeholder="123456789" value={settings.whatsappWabaId} onChange={(e) => set('whatsappWabaId', e.target.value)} style={{ marginBottom: 8, width: '100%' }} />
+                <label className="settings-label">Phone Number ID</label>
+                <input className="bot-name-input" type="text" placeholder="123456789" value={settings.whatsappPhoneNumberId} onChange={(e) => set('whatsappPhoneNumberId', e.target.value)} style={{ marginBottom: 8, width: '100%' }} />
+                <label className="settings-label">Access Token (opcional, se genera si no se pone)</label>
+                <input className="bot-name-input" type="password" placeholder="EAA..." value={settings.whatsappAccessToken} onChange={(e) => set('whatsappAccessToken', e.target.value)} style={{ marginBottom: 8, width: '100%' }} />
+                <label className="settings-label">Verify Token (webhook)</label>
+                <input className="bot-name-input" type="text" placeholder="mi-token-secreto" value={settings.whatsappVerifyToken} onChange={(e) => set('whatsappVerifyToken', e.target.value)} style={{ marginBottom: 8, width: '100%' }} />
+                <label className="settings-label">Número de teléfono</label>
+                <input className="bot-name-input" type="text" placeholder="+1234567890" value={settings.whatsappPhone} onChange={(e) => set('whatsappPhone', e.target.value)} style={{ width: '100%' }} />
+              </div>
+            </>
+          )}
         </div>
         <div className="modal-footer">
           <button className="btn btn-primary" onClick={save} disabled={saving}>
@@ -603,7 +713,7 @@ function SettingsPanel({ open, onClose }) {
 }
 
 /* ─── Header ──────────────────────────── */
-function Header({ status, error, onMenuToggle }) {
+function Header({ status, error, onMenuToggle, botName }) {
   const label =
     status === true ? '✅ API conectada' :
     status === false ? '🔴 ' + (error || 'API desconectada') :
@@ -612,7 +722,7 @@ function Header({ status, error, onMenuToggle }) {
 
   return (
     <div className="header">
-      <h1>🚢 Quinceañera Cruise — Knowledge Chat</h1>
+      <h1>🚢 {botName || 'Quinceañera Cruise'} — Knowledge Chat</h1>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
         {cls && <span className={`status-dot ${cls}`} />}
         <span style={{ color: 'var(--gray-200)' }}>{label}</span>
@@ -630,44 +740,183 @@ export default function App() {
   const [error, setError] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [bots, setBots] = useState([]);
+  const [selectedBotId, setSelectedBotId] = useState(null);
+  const [newBotName, setNewBotName] = useState('');
+  const [addingBot, setAddingBot] = useState(false);
+  const [deletingBot, setDeletingBot] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState('');
   const [sourcesVersion, setSourcesVersion] = useState(0);
 
+  const loadBots = useCallback(async () => {
+    try { setBots(await getBots()); } catch {}
+  }, []);
+
+  useEffect(() => { loadBots(); }, [loadBots]);
+
+  // Health check once
   useEffect(() => {
     const check = async () => {
       const result = await healthCheck();
       setOnline(result.ok);
-      if (!result.ok && result.status) {
-        setError(`Error ${result.status}`);
-      } else if (!result.ok) {
-        setError('Sin conexión');
-      } else {
-        setError('');
-      }
+      setError(result.ok ? '' : result.status ? `Error ${result.status}` : 'Sin conexión');
     };
-    // Solo al montar el componente (sin polling ni eventos adicionales)
     check();
   }, []);
+
+  const handleCreateBot = async () => {
+    const name = newBotName.trim();
+    if (!name) return;
+    try {
+      const { bot } = await createBot(name, '');
+      setBots((prev) => [...prev, bot]);
+      setNewBotName('');
+      setAddingBot(false);
+      setSelectedBotId(bot.id);
+      setSettingsOpen(true);
+    } catch (e) {
+      alert('Error al crear bot: ' + e.message);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deletingBot || deleteConfirm.trim() !== deletingBot.name) return;
+    const id = deletingBot.id;
+    try {
+      await deleteBot(id);
+      setBots((prev) => prev.filter((b) => b.id !== id));
+      if (selectedBotId === id) setSelectedBotId(null);
+    } catch (e) { alert('Error: ' + e.message); }
+    setDeletingBot(null);
+    setDeleteConfirm('');
+  };
+
+  const handleDeleteBot = async (id) => {
+    const bot = bots.find((b) => b.id === id);
+    if (!bot) return;
+    setDeletingBot(bot);
+    setDeleteConfirm('');
+  };
+
+  const selectedBot = bots.find((b) => b.id === selectedBotId);
 
   return (
     <div className="layout">
       {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
       <aside className={`sidebar${sidebarOpen ? ' open' : ''}`}>
-        <button className="sidebar-close" onClick={() => setSidebarOpen(false)} aria-label="Cerrar menú">
-          ✕
-        </button>
+        <button className="sidebar-close" onClick={() => setSidebarOpen(false)} aria-label="Cerrar menú">✕</button>
+
         <div className="sidebar-section">
-          <button className="btn btn-secondary btn-block" onClick={() => { setSidebarOpen(false); setSettingsOpen(true); }}>
-            ⚙️ Configuración
+          <h3>🤖 Mis Bots</h3>
+        </div>
+
+        <div className="bot-list">
+          {bots.map((bot) => (
+            <div
+              key={bot.id}
+              className={`bot-card${selectedBotId === bot.id ? ' selected' : ''}`}
+              onClick={() => { setSelectedBotId(bot.id); setSidebarOpen(false); }}
+            >
+              <div className="bot-name">{bot.name}</div>
+              <div className="bot-actions">
+                <button
+                  className="btn btn-secondary btn-sm"
+                  title="Configuración"
+                  onClick={(e) => { e.stopPropagation(); setSelectedBotId(bot.id); setSettingsOpen(true); }}
+                >⚙️</button>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  title="Eliminar"
+                  onClick={(e) => { e.stopPropagation(); handleDeleteBot(bot.id); }}
+                >🗑️</button>
+              </div>
+            </div>
+          ))}
+          {bots.length === 0 && (
+            <p className="settings-hint" style={{ padding: '0 16px' }}>No hay bots aún. Crea uno para empezar.</p>
+          )}
+        </div>
+
+        <div className="sidebar-section">
+          <button className="btn btn-primary btn-block" onClick={() => setAddingBot(true)}>
+            + Nuevo Bot
           </button>
         </div>
-        <UploadPanel onRefresh={() => setSourcesVersion((v) => v + 1)} />
-        <SourceList refreshKey={sourcesVersion} />
       </aside>
+
       <main className="main">
-        <Header status={online} error={error} onMenuToggle={() => setSidebarOpen((o) => !o)} />
-        <ChatPanel online={online === true} />
+        <Header
+          status={online}
+          error={error}
+          onMenuToggle={() => setSidebarOpen((o) => !o)}
+          botName={selectedBot?.name}
+        />
+        <ChatPanel online={online === true} botId={selectedBotId} />
       </main>
-      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+
+      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} botId={selectedBotId} />
+
+      {/* Modal: eliminar bot */}
+      {deletingBot && (
+        <div className="modal-overlay" onClick={() => { setDeletingBot(null); setDeleteConfirm(''); }}>
+          <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>🗑️ Eliminar bot</h2>
+              <button className="btn btn-secondary btn-sm" onClick={() => { setDeletingBot(null); setDeleteConfirm(''); }}>✕</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ fontSize: 13, color: 'var(--gray-200)', marginBottom: 10 }}>
+                Esta acción no se puede deshacer. Escribe <strong style={{ color: 'var(--coral)' }}>{deletingBot.name}</strong> para confirmar:
+              </p>
+              <input
+                type="text"
+                className="bot-name-input"
+                placeholder={deletingBot.name}
+                value={deleteConfirm}
+                onChange={(e) => setDeleteConfirm(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && confirmDelete()}
+                autoFocus
+              />
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn btn-primary"
+                style={{ background: 'var(--coral)' }}
+                onClick={confirmDelete}
+                disabled={deleteConfirm.trim() !== deletingBot.name}
+              >
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {addingBot && (
+        <div className="modal-overlay" onClick={() => setAddingBot(false)}>
+          <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>🤖 Nuevo Bot</h2>
+              <button className="btn btn-secondary btn-sm" onClick={() => setAddingBot(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <input
+                type="text"
+                className="bot-name-input"
+                placeholder="Nombre del bot"
+                value={newBotName}
+                onChange={(e) => setNewBotName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleCreateBot()}
+                autoFocus
+              />
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-primary" onClick={handleCreateBot} disabled={!newBotName.trim()}>
+                Crear y configurar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
