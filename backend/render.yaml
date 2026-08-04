@@ -31,6 +31,8 @@ services:
         sync: false
       - key: RESEND_API_KEY
         sync: false
+      - key: RESEND_SENDER_EMAIL
+        sync: false
       - key: ESCALATION_EMAIL
         sync: false
       - key: MIN_CONFIDENCE
