@@ -153,16 +153,16 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     }
   }
 
-  // ── Check if user wants an advisor ──────────────────────────────
+  // ── Check if user explicitly asks for an advisor (auto-send, no confirmation) ──
   if (shouldEscalate(userId, userMessage, relevantChunks).escalate) {
-    setPendingEscalation(userId, {
+    sendEscalationEmail({
       userId, userName, query: userMessage,
       reason: 'Cliente solicitó asesor',
       history: historySnapshot,
     });
     return {
-      answer: '¿Quieres que le notifique a uno de nuestros asesores para que te contacte personalmente? Responde "sí" para enviar la notificación o "no" para continuar. 😊',
-      chunks: relevantChunks, escalated: false,
+      answer: '¡Listo! Ya notifiqué a nuestro equipo. Te contactarán pronto. ¿Necesitas algo más mientras tanto? 😊',
+      chunks: relevantChunks, escalated: true,
     };
   }
 
@@ -177,9 +177,6 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
       'Eres Ana, asesora de Angela\'s Vacations LLC, una agencia boutique con 20 años de experiencia. ' +
       'Estás ayudando a familias interesadas en el crucero de Quinceañeras a bordo del MSC World America ' +
       '(20-27 marzo 2027).\n\n' +
-      (history.length > 0
-        ? 'HISTORIAL:\n' + history.slice(-6).map(m => `  ${m.role === 'user' ? 'Cliente' : 'Tú'}: ${m.text}`).join('\n') + '\n\n'
-        : '') +
       'ESTILO DE RESPUESTA:\n' +
       '- Responde en espa\u00f1ol, con calidez y entusiasmo. Usa emojis ocasionalmente.\n' +
       '- NUNCA menciones "fuentes", "contexto" ni t\u00e9rminos t\u00e9cnicos.\n' +
@@ -198,6 +195,13 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
   }
 
   messages.push({ role: 'system', content: systemPrompt });
+
+  // Historial previo como turnos reales de mensajes (contexto para el modelo)
+  const { maxHistoryMessages } = getSettings();
+  for (const m of history.slice(-maxHistoryMessages)) {
+    messages.push({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text });
+  }
+
   messages.push({ role: 'user', content: userMessage });
 
   // 3. Call DeepSeek with function calling
@@ -214,10 +218,10 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     return { answer: 'Lo siento, no pude procesar tu mensaje. ¿Puedes intentarlo de nuevo?', chunks: [], escalated: false };
   }
 
-  // Save to history
-  history.push({ role: 'user', text: userMessage.substring(0, 200) });
-  history.push({ role: 'assistant', text: content.substring(0, 300) });
-  if (history.length > 6) history.splice(0, history.length - 6);
+  // Save to history (depth y truncado para acotar tokens; profundidad configurable)
+  history.push({ role: 'user', text: userMessage.substring(0, 500) });
+  history.push({ role: 'assistant', text: content.substring(0, 800) });
+  if (history.length > maxHistoryMessages) history.splice(0, history.length - maxHistoryMessages);
 
   return { answer: content, chunks: relevantChunks, escalated: false };
 }

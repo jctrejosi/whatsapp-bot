@@ -197,6 +197,14 @@ body {
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+.queue-indicator {
+  font-size: 11px;
+  color: var(--gold-light);
+  background: rgba(200, 169, 81, 0.08);
+  border-top: 1px solid rgba(200, 169, 81, 0.15);
+  padding: 6px 20px;
+}
+
 .input-area input {
   flex: 1;
   padding: 10px 14px;

@@ -54,7 +54,10 @@ function ChatPanel({ online }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [queueCount, setQueueCount] = useState(0);
   const messagesEnd = useRef(null);
+  const queue = useRef([]);
+  const sending = useRef(false);
 
   const scrollToBottom = useCallback(() => {
     messagesEnd.current?.scrollIntoView({ behavior: 'smooth' });
@@ -62,34 +65,46 @@ function ChatPanel({ online }) {
 
   useEffect(() => scrollToBottom(), [messages, loading]);
 
-  const handleSend = async () => {
-    const text = input.trim();
-    if (!text || loading || !online) return;
-
-    setInput('');
-    setMessages((prev) => [...prev, { role: 'user', text }]);
+  const sendOne = useCallback(async (text) => {
+    sending.current = true;
     setLoading(true);
-
     try {
       const data = await chat(text);
       setMessages((prev) => [
         ...prev,
-        {
-          role: 'bot',
-          text: data.answer,
-          chunks: data.chunks_used || [],
-        },
+        { role: 'bot', text: data.answer, chunks: data.chunks_used || [] },
       ]);
     } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'bot',
-          text: '❌ ' + err.message,
-        },
-      ]);
+      setMessages((prev) => [...prev, { role: 'bot', text: '❌ ' + err.message }]);
     } finally {
       setLoading(false);
+      sending.current = false;
+    }
+  }, []);
+
+  // When the bot finishes a response, send the next queued message (if any)
+  useEffect(() => {
+    if (!loading && !sending.current && queue.current.length > 0) {
+      const next = queue.current.shift();
+      setQueueCount(queue.current.length);
+      sendOne(next);
+    }
+  }, [loading, sendOne]);
+
+  const handleSend = () => {
+    const text = input.trim();
+    if (!text || !online) return;
+
+    setInput('');
+
+    if (loading || sending.current) {
+      // Enqueue: show message immediately, send after current response
+      setMessages((prev) => [...prev, { role: 'user', text }]);
+      queue.current.push(text);
+      setQueueCount(queue.current.length);
+    } else {
+      setMessages((prev) => [...prev, { role: 'user', text }]);
+      sendOne(text);
     }
   };
 
@@ -133,16 +148,21 @@ function ChatPanel({ online }) {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          disabled={loading || !online}
+          disabled={!online}
         />
         <button
           className="btn btn-primary"
           onClick={handleSend}
-          disabled={loading || !online || !input.trim()}
+          disabled={!online || !input.trim()}
         >
-          Enviar
+          {loading ? '⏳' : 'Enviar'}
         </button>
       </div>
+      {queueCount > 0 && (
+        <div className="queue-indicator">
+          ⏳ {queueCount} mensaje{queueCount > 1 ? 's' : ''} encolado{queueCount > 1 ? 's' : ''} — se enviarán en cuanto termine la respuesta
+        </div>
+      )}
     </div>
   );
 }
@@ -518,6 +538,13 @@ function SettingsPanel({ open, onClose }) {
               value={settings.topK}
               min={1} max={10} step={1}
               onChange={(v) => set('topK', v)}
+            />
+            <SliderRow
+              label="Mensajes de contexto (historial)"
+              hint="Cuántos turnos previos se envían al modelo en cada pregunta para mantener el contexto."
+              value={settings.maxHistoryMessages}
+              min={1} max={30} step={1}
+              onChange={(v) => set('maxHistoryMessages', v)}
             />
             <SliderRow
               label="Confianza mínima de búsqueda"

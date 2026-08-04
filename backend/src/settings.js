@@ -46,6 +46,9 @@ function envDefaults() {
     // Fragmentos de conocimiento usados por respuesta
     topK: 3,
 
+    // Mensajes de historial (turnos) que se envían como contexto en cada pregunta
+    maxHistoryMessages: parseInt(process.env.MAX_HISTORY_MESSAGES || '6', 10),
+
     // Usar DeepSeek V4 Pro como reranker de los resultados
     useReranker: true,
   };
@@ -63,6 +66,7 @@ const VALIDATORS = {
   temperature: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 2,
   maxTokens: (v) => Number.isInteger(v) && v >= 128 && v <= 8192,
   topK: (v) => Number.isInteger(v) && v >= 1 && v <= 20,
+  maxHistoryMessages: (v) => Number.isInteger(v) && v >= 1 && v <= 30,
   useReranker: (v) => typeof v === 'boolean',
 };
 

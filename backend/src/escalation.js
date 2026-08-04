@@ -17,12 +17,35 @@ const ESCALATION_KEYWORDS = [
   'quiero hablar con alguien',
   'persona real',
   'agente humano',
+  'atención personalizada',
   'atención personal',
+  'atencion personalizada',
   'comunicarme con un asesor',
+  'comunícame con un asesor',
+  'comunícame con',
+  'contáctame con un asesor',
+  'contactar con un asesor',
+  'contacto con un asesor',
+  'contratar con un asesor',
   'asesor real',
+  'asesor por favor',
+  'quiero un asesor',
+  'necesito un asesor',
+  'necesito hablar con',
+  'quiero que me contacten',
+  'que me llame',
+  'que me llamen',
+  'comunicarme con alguien',
+  'ponerme en contacto',
+  'atención al cliente',
   'hablar con una persona',
+  'hablar con un humano',
+  'hablar con alguien de verdad',
+  'me gustaría contratar',
   'no me entiendes',
   'no sirves',
+  'no me resuelves',
+  'no me estás ayudando',
 ];
 
 // ─── Main escalation check ───────────────────────────────────────────────
@@ -85,7 +108,7 @@ async function sendEscalationEmail({ userId, userName, query, history, reason })
     .join('\n\n');
 
   const html = `
-    <h2>🚨 Escalación — Quinceañera Cruise Bot</h2>
+    <h2>🚢 Escalación — Quinceañera Cruise Bot</h2>
     <p><strong>Motivo:</strong> ${reason}</p>
     <hr>
     <p><strong>Usuario:</strong> ${userName || 'Desconocido'} (${userId})</p>
@@ -104,7 +127,7 @@ async function sendEscalationEmail({ userId, userName, query, history, reason })
         {
           from,
           to,
-          subject: `🚨 Escalación: ${reason.substring(0, 60)}`,
+          subject: `🚢 Solicitud de asesor: ${(query || reason).substring(0, 70)}`,
           html,
         },
         {
