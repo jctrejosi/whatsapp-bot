@@ -26,7 +26,7 @@ function envDefaults() {
     escalationEmails: splitEmails(process.env.ESCALATION_EMAIL) || ['juanktrejos15@gmail.com'],
 
     // Remitente usado en los correos (debe pertenecer a un dominio verificado en Resend)
-    senderEmail: process.env.RESEND_SENDER_EMAIL || 'bot@angelasvacations.com',
+    senderEmail: process.env.RESEND_SENDER_EMAIL || 'onboarding@resend.dev',
 
     // Similitud mínima (0-1) para considerar un fragmento relevante en la búsqueda
     minConfidence: parseFloat(process.env.MIN_CONFIDENCE || '0'),
