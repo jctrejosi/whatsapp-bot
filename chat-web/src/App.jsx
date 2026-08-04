@@ -3,8 +3,6 @@ import { chat, getBots, createBot, deleteBot, updateBot, healthCheck, getSetting
 
 /* ─── Message Bubble ──────────────────── */
 function MessageBubble({ msg }) {
-  const [showSources, setShowSources] = useState(false);
-
   const isUser = msg.role === 'user';
 
   return (
@@ -12,25 +10,6 @@ function MessageBubble({ msg }) {
       {!isUser && <div className="label">🤖 Quinceañera Bot</div>}
       {isUser && <div className="label">Tú</div>}
       <div className="bubble">{msg.text}</div>
-
-      {!isUser && msg.chunks && msg.chunks.length > 0 && (
-        <>
-          <span className="sources-toggle" onClick={() => setShowSources(!showSources)}>
-            {showSources ? '▲ Ocultar fuentes' : '▼ Ver fuentes usadas'} ({msg.chunks.length})
-          </span>
-          {showSources && (
-            <div className="sources-list">
-              {msg.chunks.map((c, i) => (
-                <div key={i} className="source-item">
-                  <strong>Fuente {i + 1}</strong> — fragmento {c.chunk_index}
-                  <br />
-                  {c.content.substring(0, 150)}...
-                </div>
-              ))}
-            </div>
-          )}
-        </>
-      )}
     </div>
   );
 }
@@ -374,9 +353,10 @@ function SliderRow({ label, hint, value, min, max, step, onChange }) {
   );
 }
 
-function SettingsPanel({ open, onClose, botId }) {
+function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onBotUpdated }) {
   const [settings, setSettings] = useState(null);
   const [newEmail, setNewEmail] = useState('');
+  const [botNameInput, setBotNameInput] = useState('');
   const [msg, setMsg] = useState('');
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -390,6 +370,7 @@ function SettingsPanel({ open, onClose, botId }) {
     if (!open) return;
     setMsg('');
     setTestResult('');
+    setBotNameInput(botId ? (botName || '') : '');
     setTab('general');
     const fetchSettings = botId ? getBotSettings(botId) : getSettings();
     fetchSettings
@@ -398,8 +379,10 @@ function SettingsPanel({ open, onClose, botId }) {
     // Cargar fuentes de conocimiento si hay botId
     if (botId) {
       getBotKnowledge(botId).then(setSources).catch(() => {});
+    } else {
+      setSources([]);
     }
-  }, [open, botId]);
+  }, [open, botId, botName]);
 
   if (!open || !settings) return null;
 
@@ -452,8 +435,26 @@ function SettingsPanel({ open, onClose, botId }) {
     setSaving(true);
     setMsg('');
     try {
-      setSettings(botId ? await updateBotSettings(botId, settings) : await updateSettings(settings));
-      onClose();
+      const name = botNameInput.trim();
+      if (creating) {
+        if (!name) {
+          setMsg('❌ Escribe un nombre para el bot');
+          setSaving(false);
+          return;
+        }
+        const { bot } = await createBot(name, '');
+        await updateBotSettings(bot.id, settings);
+        onCreated(bot); // el padre lo agrega, lo selecciona y pasa a modo edición
+        setMsg('✅ Bot creado. Ahora puedes subir su conocimiento y ajustar lo que quieras.');
+      } else {
+        // Si el nombre cambió, actualizarlo en la tabla bots
+        if (botId && name && name !== (botName || '')) {
+          await updateBot(botId, { name });
+          onBotUpdated?.();
+        }
+        setSettings(botId ? await updateBotSettings(botId, settings) : await updateSettings(settings));
+        onClose();
+      }
     } catch (e) {
       setMsg('❌ ' + e.message);
     } finally {
@@ -497,10 +498,24 @@ function SettingsPanel({ open, onClose, botId }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>⚙️ Configuración</h2>
+          <h2>{creating ? '🤖 Nuevo Bot — Configuración' : '⚙️ Configuración'}</h2>
           <button className="btn btn-secondary btn-sm" onClick={onClose}>✕</button>
         </div>
         <div className="modal-body">
+          {(creating || botId) && (
+            <div className="settings-section">
+              <label className="settings-label">Nombre del bot</label>
+              <input
+                className="bot-name-input"
+                type="text"
+                placeholder={creating ? 'Ej: Quinceañera Bot' : botName}
+                value={botNameInput}
+                onChange={(e) => setBotNameInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && save()}
+                autoFocus={creating}
+              />
+            </div>
+          )}
           <div className="settings-tabs">
             <button className={`tab-btn${tab === 'general' ? ' active' : ''}`} onClick={() => setTab('general')}>⚙️ General</button>
             <button className={`tab-btn${tab === 'knowledge' ? ' active' : ''}`} onClick={() => setTab('knowledge')}>📚 Conocimiento</button>
@@ -642,7 +657,12 @@ function SettingsPanel({ open, onClose, botId }) {
             <>
               <div className="settings-section">
                 <h3>📁 Archivos cargados ({sources.length})</h3>
-                {sources.length === 0 && (
+                {creating && (
+                  <p className="settings-hint">
+                    Primero guarda el bot para poder subir archivos de conocimiento.
+                  </p>
+                )}
+                {!creating && sources.length === 0 && (
                   <p className="settings-hint">No hay archivos. Sube un PDF para entrenar al bot.</p>
                 )}
                 {sources.map((s) => (
@@ -658,10 +678,16 @@ function SettingsPanel({ open, onClose, botId }) {
                 ))}
               </div>
               <div className="settings-section">
-                <label className="btn btn-primary btn-block" style={{ cursor: 'pointer', textAlign: 'center', display: 'block' }}>
-                  {uploading ? '⏳ Subiendo...' : '📤 Subir PDF'}
-                  <input type="file" accept=".pdf" style={{ display: 'none' }} onChange={handleUpload} disabled={uploading} />
-                </label>
+                {creating ? (
+                  <p className="settings-hint" style={{ fontSize: 12 }}>
+                    📤 La subida de PDFs se habilita después de crear el bot.
+                  </p>
+                ) : (
+                  <label className="btn btn-primary btn-block" style={{ cursor: 'pointer', textAlign: 'center', display: 'block' }}>
+                    {uploading ? '⏳ Subiendo...' : '📤 Subir PDF'}
+                    <input type="file" accept=".pdf" style={{ display: 'none' }} onChange={handleUpload} disabled={uploading} />
+                  </label>
+                )}
               </div>
               <div className="settings-section">
                 <h3>🔍 Búsqueda (RAG)</h3>
@@ -699,12 +725,14 @@ function SettingsPanel({ open, onClose, botId }) {
           )}
         </div>
         <div className="modal-footer">
-          <button className="btn btn-primary" onClick={save} disabled={saving}>
-            {saving ? 'Guardando...' : '💾 Guardar cambios'}
+          <button className="btn btn-primary" onClick={save} disabled={saving || (creating && !botNameInput.trim())}>
+            {saving ? 'Guardando...' : creating ? '🚀 Crear y configurar' : '💾 Guardar cambios'}
           </button>
-          <button className="btn btn-secondary" onClick={reset} disabled={saving}>
-            ↺ Restablecer
-          </button>
+          {!creating && (
+            <button className="btn btn-secondary" onClick={reset} disabled={saving}>
+              ↺ Restablecer
+            </button>
+          )}
           {msg && <span className="settings-status">{msg}</span>}
         </div>
       </div>
@@ -742,8 +770,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [bots, setBots] = useState([]);
   const [selectedBotId, setSelectedBotId] = useState(null);
-  const [newBotName, setNewBotName] = useState('');
-  const [addingBot, setAddingBot] = useState(false);
+  const [creatingBot, setCreatingBot] = useState(false);
   const [deletingBot, setDeletingBot] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState('');
   const [sourcesVersion, setSourcesVersion] = useState(0);
@@ -764,21 +791,7 @@ export default function App() {
     check();
   }, []);
 
-  const handleCreateBot = async () => {
-    const name = newBotName.trim();
-    if (!name) return;
-    try {
-      const { bot } = await createBot(name, '');
-      setBots((prev) => [...prev, bot]);
-      setNewBotName('');
-      setAddingBot(false);
-      setSelectedBotId(bot.id);
-      setSettingsOpen(true);
-    } catch (e) {
-      alert('Error al crear bot: ' + e.message);
-    }
-  };
-
+  const selectedBot = bots.find((b) => b.id === selectedBotId);
   const confirmDelete = async () => {
     if (!deletingBot || deleteConfirm.trim() !== deletingBot.name) return;
     const id = deletingBot.id;
@@ -797,8 +810,6 @@ export default function App() {
     setDeletingBot(bot);
     setDeleteConfirm('');
   };
-
-  const selectedBot = bots.find((b) => b.id === selectedBotId);
 
   return (
     <div className="layout">
@@ -838,7 +849,14 @@ export default function App() {
         </div>
 
         <div className="sidebar-section">
-          <button className="btn btn-primary btn-block" onClick={() => setAddingBot(true)}>
+          <button
+            className="btn btn-primary btn-block"
+            onClick={() => {
+              setSelectedBotId(null);
+              setCreatingBot(true);
+              setSettingsOpen(true);
+            }}
+          >
             + Nuevo Bot
           </button>
         </div>
@@ -854,7 +872,19 @@ export default function App() {
         <ChatPanel online={online === true} botId={selectedBotId} />
       </main>
 
-      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} botId={selectedBotId} />
+      <SettingsPanel
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        botId={selectedBotId}
+        botName={selectedBot?.name || ''}
+        creating={creatingBot}
+        onCreated={(bot) => {
+          setBots((prev) => [...prev, bot]);
+          setSelectedBotId(bot.id);
+          setCreatingBot(false);
+        }}
+        onBotUpdated={loadBots}
+      />
 
       {/* Modal: eliminar bot */}
       {deletingBot && (
@@ -886,32 +916,6 @@ export default function App() {
                 disabled={deleteConfirm.trim() !== deletingBot.name}
               >
                 Eliminar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {addingBot && (
-        <div className="modal-overlay" onClick={() => setAddingBot(false)}>
-          <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>🤖 Nuevo Bot</h2>
-              <button className="btn btn-secondary btn-sm" onClick={() => setAddingBot(false)}>✕</button>
-            </div>
-            <div className="modal-body">
-              <input
-                type="text"
-                className="bot-name-input"
-                placeholder="Nombre del bot"
-                value={newBotName}
-                onChange={(e) => setNewBotName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleCreateBot()}
-                autoFocus
-              />
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-primary" onClick={handleCreateBot} disabled={!newBotName.trim()}>
-                Crear y configurar
               </button>
             </div>
           </div>

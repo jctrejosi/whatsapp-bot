@@ -171,7 +171,12 @@ app.get('/logs', (req, res) => {
 // ─── Bots (multi-bot platform) ────────────────────────────────────────
 
 app.get('/bots', async (req, res) => {
-  res.json(await listBots());
+  try {
+    res.json(await listBots());
+  } catch (err) {
+    console.error('GET /bots FAILED:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/bots', async (req, res) => {
@@ -185,7 +190,7 @@ app.post('/bots', async (req, res) => {
   }
 });
 
-app.put('/bots/:id', (req, res) => {
+app.put('/bots/:id', async (req, res) => {
   try {
     res.json(await updateBot(req.params.id, req.body || {}));
   } catch (err) {
@@ -193,7 +198,7 @@ app.put('/bots/:id', (req, res) => {
   }
 });
 
-app.delete('/bots/:id', (req, res) => {
+app.delete('/bots/:id', async (req, res) => {
   try {
     await deleteBot(req.params.id);
     res.json({ ok: true });
@@ -205,10 +210,15 @@ app.delete('/bots/:id', (req, res) => {
 // ─── Per-bot settings ─────────────────────────────────────────────────
 
 app.get('/bots/:id/settings', async (req, res) => {
-  res.json(await getSettings(req.params.id));
+  try {
+    res.json(await getSettings(req.params.id));
+  } catch (err) {
+    console.error('GET /bots/:id/settings FAILED:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.put('/bots/:id/settings', (req, res) => {
+app.put('/bots/:id/settings', async (req, res) => {
   try {
     res.json(await updateSettings(req.params.id, req.body || {}));
   } catch (err) {
@@ -217,7 +227,12 @@ app.put('/bots/:id/settings', (req, res) => {
 });
 
 app.post('/bots/:id/settings/reset', async (req, res) => {
-  res.json(await resetSettings(req.params.id));
+  try {
+    res.json(await resetSettings(req.params.id));
+  } catch (err) {
+    console.error('POST /bots/:id/settings/reset FAILED:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/bots/:id/settings/test-email', async (req, res) => {
@@ -297,19 +312,21 @@ app.post('/bots/:id/chat', async (req, res) => {
 });
 
 // ─── Global settings (backward compat + global defaults) ────────────────
-// ─── Global settings (backward compat + global defaults) ────────────────
 
 // GET /settings — current global configuration
-app.get('/settings', async (req, res) => { res.json(await getSettings()); });
+app.get('/settings', async (req, res) => {
+  try { res.json(await getSettings()); }
+  catch (err) { console.error('GET /settings FAILED:', err.message); res.status(500).json({ error: err.message }); }
+});
 
 // PUT /settings — validate and apply a subset of global settings
-app.put('/settings', (req, res) => {
+app.put('/settings', async (req, res) => {
   try { res.json(await updateSettings(null, req.body || {})); }
   catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 // POST /settings/reset
-app.post('/settings/reset', (req, res) => {
+app.post('/settings/reset', async (req, res) => {
   try { res.json(await resetSettings()); }
   catch (err) { res.status(500).json({ error: err.message }); }
 });
