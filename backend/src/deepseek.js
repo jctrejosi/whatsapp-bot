@@ -30,11 +30,14 @@ CUÁNDO USAR FUNCIONES:
 - Para el itinerario día por día → usa obtener_itinerario
 - Cuando el cliente muestra intención de comprar, dice "estoy de acuerdo", "me gusta el precio", "perfecto", "¿cómo reservo?", "¿cómo sigo?" o frases similares → PRIMERO pide sus datos (nombre, teléfono o correo) y cuántas personas viajarán. Cuando los tengas, usa iniciar_cierre_venta.
 - Para TODO lo demás: compara, explica, recomienda y resume usando los DATOS DEL EVENTO que tienes a continuación.
+- Si no encuentras la información que el cliente necesita, ofrécele amablemente contactar a un asesor — siempre en el idioma del usuario.
 
 DATOS DEL EVENTO:
 {context}`;
 
-const DEFAULT_SYSTEM_PROMPT_FALLBACK = `Eres Ana, asesora de Angela's Vacations LLC. Responde en el mismo idioma en que te hable el usuario, con un tono cálido y entusiasta.`;
+const DEFAULT_SYSTEM_PROMPT_FALLBACK = `Eres Ana, asesora de Angela's Vacations LLC. Responde en el mismo idioma en que te hable el usuario, con un tono cálido y entusiasta.
+
+Si no encuentras la información que el cliente necesita, ofrécele amablemente contactar a un asesor — siempre en el idioma del usuario.`;
 
 // Conversation history per user (in memory — max 6 messages)
 const conversationHistory = new Map();
@@ -240,8 +243,11 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     } else {
       systemPrompt = DEFAULT_SYSTEM_PROMPT_FALLBACK;
     }
-  } else if (relevantChunks.length > 0 && systemPrompt.includes('{context}')) {
-    const context = relevantChunks.map((c, i) => `[Fuente ${i + 1}]:\n${c.content}`).join('\n\n---\n\n');
+  } else if (systemPrompt.includes('{context}')) {
+    // Reemplazar {context} siempre: con los chunks si hay, o un texto neutral si no
+    const context = relevantChunks.length > 0
+      ? relevantChunks.map((c, i) => `[Fuente ${i + 1}]:\n${c.content}`).join('\n\n---\n\n')
+      : '(No hay información adicional disponible en este momento.)';
     systemPrompt = systemPrompt.replace('{context}', context);
   }
 
@@ -296,15 +302,15 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     return { answer: '¡Gracias por tu interés! 😊 ¿Quieres que un asesor te contacte para ayudarte con la reserva? Responde "sí" y te conectamos.', chunks: [], escalated: false };
   }
 
-  // Si el modelo respondió sin fragmentos de la base de conocimiento, sugiere
-  // contactar con un asesor (sin escalar automáticamente)
+  // Si el modelo respondió sin fragmentos de la base de conocimiento, activa
+  // la escalación por si el usuario confirma (el propio modelo ya sugirió
+  // contactar al asesor en el idioma del usuario según su prompt).
   if (!escalated && content && (!relevantChunks || relevantChunks.length === 0)) {
     setPendingEscalation(userId, {
       userId, userName, query: userMessage,
       reason: 'Información no encontrada en la base de conocimiento',
       history: historySnapshot,
     });
-    content += '\n\n💡 Si necesitas información más precisa o personalizada, un asesor puede ayudarte. ¿Quieres que te contactemos? Responde "sí" y te avisamos.';
   }
 
   // Save to history (depth y truncado para acotar tokens; profundidad configurable)
