@@ -4,6 +4,8 @@ const express = require('express');
 const cors = require('cors');
 const { sendMessage, markAsRead } = require('./whatsapp');
 const { chatWithDeepSeek } = require('./deepseek');
+const { getSettings, updateSettings, resetSettings } = require('./settings');
+const { sendEscalationEmail } = require('./escalation');
 
 const app = express();
 
@@ -149,6 +151,54 @@ app.get('/conversations/:userId', async (req, res) => {
   } catch (e) {
     console.error(`Proxy /conversations FAILED: ${e.code || e.message}`);
     res.status(502).json({ error: 'Knowledge service unreachable' });
+  }
+});
+
+// ─── Settings (admin dashboard) ─────────────────────────────────────────
+
+// GET /settings — current configuration
+app.get('/settings', (req, res) => {
+  res.json(getSettings());
+});
+
+// PUT /settings — validate and apply a subset of settings
+app.put('/settings', (req, res) => {
+  try {
+    res.json(updateSettings(req.body || {}));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// POST /settings/reset — back to env vars / defaults
+app.post('/settings/reset', (req, res) => {
+  try {
+    res.json(resetSettings());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /settings/test-email — send a test escalation email to all advisors
+app.post('/settings/test-email', async (req, res) => {
+  try {
+    const result = await sendEscalationEmail({
+      userId: 'test',
+      userName: 'Prueba de configuración',
+      query: 'Este es un correo de prueba enviado desde el panel de configuración.',
+      history: [],
+      reason: 'Prueba de configuración del bot',
+    });
+    if (result.ok) {
+      res.json(result);
+    } else {
+      res.status(502).json({
+        error: result.error || 'No se pudo enviar el correo',
+        results: result.results,
+      });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { chat, getSources, getSource, ingestPdf, healthCheck } from './api.js';
+import { chat, getSources, getSource, ingestPdf, healthCheck, getSettings, updateSettings, resetSettings, sendTestEmail } from './api.js';
 
 /* ─── Message Bubble ──────────────────── */
 function MessageBubble({ msg }) {
@@ -329,6 +329,224 @@ function SourceList() {
   );
 }
 
+/* ─── Settings Panel (admin) ───────────── */
+function SliderRow({ label, hint, value, min, max, step, onChange }) {
+  return (
+    <div className="settings-row">
+      <div className="row-top">
+        <label>{label}</label>
+        <span className="value">{value}</span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+      />
+      {hint && <p className="settings-hint">{hint}</p>}
+    </div>
+  );
+}
+
+function SettingsPanel({ open, onClose }) {
+  const [settings, setSettings] = useState(null);
+  const [newEmail, setNewEmail] = useState('');
+  const [msg, setMsg] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setMsg('');
+    setTestResult('');
+    getSettings()
+      .then(setSettings)
+      .catch((e) => setMsg('❌ No se pudo cargar: ' + e.message));
+  }, [open]);
+
+  if (!open || !settings) return null;
+
+  const set = (key, value) => setSettings((s) => ({ ...s, [key]: value }));
+
+  const addEmail = () => {
+    const email = newEmail.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setMsg('❌ Correo inválido');
+      return;
+    }
+    if (settings.escalationEmails.includes(email)) {
+      setMsg('❌ Ese correo ya está en la lista');
+      return;
+    }
+    set('escalationEmails', [...settings.escalationEmails, email]);
+    setNewEmail('');
+    setMsg('');
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setMsg('');
+    try {
+      setSettings(await updateSettings(settings));
+      setMsg('✅ Configuración guardada');
+    } catch (e) {
+      setMsg('❌ ' + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const reset = async () => {
+    if (!window.confirm('¿Restablecer todos los valores a los predeterminados?')) return;
+    setSaving(true);
+    setMsg('');
+    try {
+      setSettings(await resetSettings());
+      setMsg('✅ Valores restablecidos');
+    } catch (e) {
+      setMsg('❌ ' + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const test = async () => {
+    setTesting(true);
+    setTestResult('');
+    try {
+      const res = await sendTestEmail();
+      if (res.ok) {
+        setTestResult('✅ Correo enviado a: ' + res.results.map((r) => r.to).join(', '));
+      } else {
+        const failed = res.results.filter((r) => !r.ok);
+        setTestResult('❌ Falló: ' + failed.map((r) => r.to + ': ' + r.error).join(' | '));
+      }
+    } catch (e) {
+      setTestResult('❌ ' + e.message);
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>⚙️ Configuración</h2>
+          <button className="btn btn-secondary btn-sm" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          <div className="settings-section">
+            <h3>📧 Notificación a asesores</h3>
+            <p className="settings-hint">
+              Correos que reciben el aviso cuando un cliente pide hablar con un asesor.
+            </p>
+            {settings.escalationEmails.map((email, i) => (
+              <div className="email-row" key={i}>
+                <span>{email}</span>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() =>
+                    set('escalationEmails', settings.escalationEmails.filter((_, j) => j !== i))
+                  }
+                >
+                  Quitar
+                </button>
+              </div>
+            ))}
+            <div className="email-add">
+              <input
+                type="email"
+                placeholder="asesor@correo.com"
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addEmail()}
+              />
+              <button className="btn btn-primary btn-sm" onClick={addEmail}>Agregar</button>
+            </div>
+            <div className="email-add">
+              <span className="email-add-label">Remitente</span>
+              <input
+                type="email"
+                placeholder="bot@tudominio.com"
+                value={settings.senderEmail}
+                onChange={(e) => set('senderEmail', e.target.value)}
+              />
+            </div>
+            <p className="settings-hint">
+              El remitente debe usar un dominio verificado en Resend. Puedes probar con
+              onboarding@resend.dev mientras verificas tu dominio.
+            </p>
+            <button className="btn btn-secondary btn-sm" onClick={test} disabled={testing}>
+              {testing ? 'Enviando...' : '📨 Enviar correo de prueba'}
+            </button>
+            {testResult && <div className="settings-status">{testResult}</div>}
+          </div>
+
+          <div className="settings-section">
+            <h3>🎛️ Sensibilidad y calidad de respuestas</h3>
+            <SliderRow
+              label="Creatividad (temperature)"
+              hint="Más alto = respuestas más variadas y naturales; más bajo = más consistentes."
+              value={settings.temperature}
+              min={0} max={1.5} step={0.05}
+              onChange={(v) => set('temperature', v)}
+            />
+            <SliderRow
+              label="Fragmentos de conocimiento (top_k)"
+              hint="Cuántos fragmentos del PDF se usan para armar cada respuesta."
+              value={settings.topK}
+              min={1} max={10} step={1}
+              onChange={(v) => set('topK', v)}
+            />
+            <SliderRow
+              label="Confianza mínima de búsqueda"
+              hint="Similitud mínima (0-1) para que un fragmento se considere relevante. 0 = sin filtro."
+              value={settings.minConfidence}
+              min={0} max={1} step={0.05}
+              onChange={(v) => set('minConfidence', v)}
+            />
+            <SliderRow
+              label="Máximo de tokens por respuesta"
+              hint="Tope de la primera respuesta del modelo."
+              value={settings.maxTokens}
+              min={256} max={4096} step={128}
+              onChange={(v) => set('maxTokens', v)}
+            />
+            <SliderRow
+              label="Intentos sin respuesta clara"
+              hint="Si el bot no encuentra respuesta en N intentos seguidos, ofrece contactar a un asesor. 0 = desactivado."
+              value={settings.maxNegativeResponses}
+              min={0} max={20} step={1}
+              onChange={(v) => set('maxNegativeResponses', v)}
+            />
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={settings.useReranker}
+                onChange={(e) => set('useReranker', e.target.checked)}
+              />
+              <span>Usar reranker (DeepSeek V4 Pro) en la búsqueda</span>
+            </label>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-primary" onClick={save} disabled={saving}>
+            {saving ? 'Guardando...' : '💾 Guardar cambios'}
+          </button>
+          <button className="btn btn-secondary" onClick={reset} disabled={saving}>
+            ↺ Restablecer
+          </button>
+          {msg && <span className="settings-status">{msg}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─── Header ──────────────────────────── */
 function Header({ status, error }) {
   const label =
@@ -352,6 +570,7 @@ function Header({ status, error }) {
 export default function App() {
   const [online, setOnline] = useState(null);
   const [error, setError] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     const check = async () => {
@@ -373,6 +592,11 @@ export default function App() {
   return (
     <div className="layout">
       <aside className="sidebar">
+        <div className="sidebar-section">
+          <button className="btn btn-secondary btn-block" onClick={() => setSettingsOpen(true)}>
+            ⚙️ Configuración
+          </button>
+        </div>
         <UploadPanel onRefresh={() => {}} />
         <SourceList />
       </aside>
@@ -380,6 +604,7 @@ export default function App() {
         <Header status={online} error={error} />
         <ChatPanel online={online === true} />
       </main>
+      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }

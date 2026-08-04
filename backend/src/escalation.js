@@ -1,9 +1,8 @@
 const axios = require('axios');
+const { getSettings } = require('./settings');
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const ESCALATION_EMAIL = process.env.ESCALATION_EMAIL || 'info@angelasvacations.com';
-const MIN_CONFIDENCE = parseFloat(process.env.MIN_CONFIDENCE || '0.65');
-const MAX_NEGATIVE = parseInt(process.env.MAX_NEGATIVE_RESPONSES || '5');
+const SENDER_NAME = 'Quinceañera Bot';
 
 // Track consecutive negative responses per user (in memory — resets on restart)
 const negativeCounts = new Map();
@@ -61,13 +60,25 @@ function resetNegative(userId) {
   negativeCounts.delete(userId);
 }
 
-// ─── Permission-based escalation ────────────────────────────────────────
+// ─── Email-based escalation (Resend) ────────────────────────────────────
 
+/**
+ * Send the escalation notification to ALL configured advisor emails.
+ * @returns {Promise<{ ok: boolean, results: Array<{ to: string, ok: boolean, error: string|null }> }>}
+ */
 async function sendEscalationEmail({ userId, userName, query, history, reason }) {
   if (!RESEND_API_KEY) {
     console.warn('RESEND_API_KEY no configurada — email no enviado');
-    return false;
+    return { ok: false, results: [], error: 'RESEND_API_KEY no configurada' };
   }
+
+  const { escalationEmails, senderEmail } = getSettings();
+  if (!escalationEmails || escalationEmails.length === 0) {
+    console.warn('No hay correos de asesores configurados — email no enviado');
+    return { ok: false, results: [], error: 'No hay correos de asesores configurados' };
+  }
+
+  const from = `${SENDER_NAME} <${senderEmail}>`;
 
   const historyText = (history || [])
     .map(m => `${m.role === 'user' ? '👤' : '🤖'}: ${m.text}`)
@@ -86,31 +97,44 @@ async function sendEscalationEmail({ userId, userName, query, history, reason })
     <p style="color:#888;font-size:12px">Quinceañera Cruise Bot — Escalación automática</p>
   `;
 
-  try {
-    await axios.post(
-      'https://api.resend.com/emails',
-      {
-        from: 'Quinceañera Bot <bot@angelasvacations.com>',
-        to: ESCALATION_EMAIL,
-        subject: `🚨 Escalación: ${reason.substring(0, 60)}`,
-        html,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${RESEND_API_KEY}`,
-          'Content-Type': 'application/json',
+  const attempts = await Promise.allSettled(
+    escalationEmails.map((to) =>
+      axios.post(
+        'https://api.resend.com/emails',
+        {
+          from,
+          to,
+          subject: `🚨 Escalación: ${reason.substring(0, 60)}`,
+          html,
         },
-      }
-    );
-    console.log(`Email de escalación enviado a ${ESCALATION_EMAIL}`);
-    return true;
-  } catch (err) {
-    console.error('Error enviando email de escalación:', err.response?.data || err.message);
-    return false;
-  }
+        {
+          headers: {
+            Authorization: `Bearer ${RESEND_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    )
+  );
+
+  const results = attempts.map((r, i) => ({
+    to: escalationEmails[i],
+    ok: r.status === 'fulfilled',
+    error:
+      r.status === 'rejected'
+        ? r.reason?.response?.data?.message || r.reason?.response?.data?.name || r.reason?.message
+        : null,
+  }));
+
+  results.forEach((r) => {
+    if (r.ok) console.log(`Email de escalación enviado a ${r.to}`);
+    else console.error(`Error enviando email a ${r.to}:`, r.error);
+  });
+
+  return { ok: results.some((r) => r.ok), results };
 }
 
-// ─── Permission-based escalation ────────────────────────────────────────
+// ─── Pending escalation confirmation ─────────────────────────────────────
 
 /**
  * Check if user has a pending escalation and is now responding to it.

@@ -1,8 +1,10 @@
 const axios = require('axios');
 const {
   shouldEscalate,
-  sendEscalationEmail, checkPendingEscalation, setPendingEscalation, clearPendingEscalation
+  sendEscalationEmail, checkPendingEscalation, setPendingEscalation, clearPendingEscalation,
+  wasAnswerClear, trackNegative, resetNegative,
 } = require('./escalation');
+const { getSettings } = require('./settings');
 const { TOOLS, FUNCTION_MAP } = require('./functions');
 
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
@@ -20,10 +22,11 @@ const DEEPSEEK_HEADERS = {
  * Search the knowledge base for relevant context.
  */
 async function searchKnowledge(query) {
+  const { topK, useReranker, minConfidence } = getSettings();
   try {
     const { data } = await axios.post(
       `${KNOWLEDGE_SERVICE_URL}/search`,
-      { query, top_k: 3, use_reranker: true },
+      { query, top_k: topK, use_reranker: useReranker, min_similarity: minConfidence },
       { headers: { 'Content-Type': 'application/json' } }
     );
     return data.results || [];
@@ -38,13 +41,14 @@ async function searchKnowledge(query) {
  * If the model returns tool_calls, execute them and call again with results.
  */
 async function callDeepSeek(messages, tools = null, attempt = 1) {
-  const maxTokens = attempt === 1 ? 1200 : attempt === 2 ? 2000 : 3000;
+  const { temperature, maxTokens } = getSettings();
+  const tokens = attempt === 1 ? maxTokens : attempt === 2 ? 2000 : 3000;
 
   const body = {
     model: 'deepseek-v4-flash',
     messages,
-    temperature: 0.7,
-    max_tokens: maxTokens,
+    temperature,
+    max_tokens: tokens,
   };
   if (tools) body.tools = tools;
 
@@ -54,7 +58,7 @@ async function callDeepSeek(messages, tools = null, attempt = 1) {
 
   // If response was truncated, retry with more tokens
   if (finishReason === 'length' && attempt < 3 && msg.content && !msg.tool_calls) {
-    console.log(`⚠️  Respuesta truncada (${msg.content.length} chars), reintentando con ${maxTokens * 1.7} tokens...`);
+    console.log(`⚠️  Respuesta truncada (${msg.content.length} chars), reintentando con más tokens...`);
     return callDeepSeek(messages, tools, attempt + 1);
   }
 
@@ -123,6 +127,25 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     relevantChunks = await searchKnowledge(userMessage);
   } catch (err) {
     console.error('Search error:', err.message);
+  }
+
+  // ── Negative-response tracking (offers an advisor after N unclear answers) ──
+  const { maxNegativeResponses } = getSettings();
+  if (wasAnswerClear(relevantChunks)) {
+    resetNegative(userId);
+  } else if (maxNegativeResponses > 0) {
+    const count = trackNegative(userId);
+    if (count >= maxNegativeResponses) {
+      resetNegative(userId);
+      setPendingEscalation(userId, {
+        userId, userName, query: userMessage,
+        reason: `Varios intentos sin respuesta clara (${count})`,
+      });
+      return {
+        answer: 'Parece que no estoy logrando ayudarte con eso... 😅 ¿Quieres que le notifique a un asesor para que te contacte personalmente? Responde "sí" y le avisamos.',
+        chunks: relevantChunks, escalated: false,
+      };
+    }
   }
 
   // ── Check if user wants an advisor ──────────────────────────────

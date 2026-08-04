@@ -48,3 +48,27 @@ export async function healthCheck() {
     return { ok: false, status: 0 };
   }
 }
+
+export async function getSettings() {
+  const res = await fetch(`${API_URL}/settings`);
+  return handleResponse(res, `Error ${res.status} al cargar configuración`);
+}
+
+export async function updateSettings(patch) {
+  const res = await fetch(`${API_URL}/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  return handleResponse(res, `Error ${res.status} al guardar configuración`);
+}
+
+export async function resetSettings() {
+  const res = await fetch(`${API_URL}/settings/reset`, { method: 'POST' });
+  return handleResponse(res, `Error ${res.status} al restablecer configuración`);
+}
+
+export async function sendTestEmail() {
+  const res = await fetch(`${API_URL}/settings/test-email`, { method: 'POST' });
+  return handleResponse(res, `Error ${res.status} al enviar correo de prueba`);
+}

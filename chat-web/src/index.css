@@ -420,6 +420,173 @@ body {
   color: var(--gray-200);
 }
 
+/* ─── Settings modal (admin) ─────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  width: 540px;
+  max-width: 94vw;
+  max-height: 88vh;
+  background: var(--navy-light);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.modal-header h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--gold-light);
+}
+
+.modal-body {
+  padding: 16px 18px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.modal-footer {
+  padding: 12px 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-section h3 {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--gold-light);
+  margin-bottom: 6px;
+}
+
+.settings-hint {
+  font-size: 11px;
+  color: var(--gray-200);
+  margin-bottom: 10px;
+}
+
+.email-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 6px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.email-add {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.email-add-label {
+  font-size: 11px;
+  color: var(--gray-200);
+  align-self: center;
+  white-space: nowrap;
+}
+
+.email-add input,
+.settings-row input[type="number"] {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--gray-800);
+  color: var(--white);
+  font-size: 13px;
+  outline: none;
+}
+
+.email-add input:focus {
+  border-color: var(--gold);
+}
+
+.btn-sm {
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+
+.btn-block {
+  width: 100%;
+}
+
+.settings-row {
+  margin-bottom: 14px;
+}
+
+.settings-row .row-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.settings-row label {
+  font-size: 13px;
+  color: var(--white);
+}
+
+.settings-row .value {
+  font-size: 12px;
+  color: var(--gold-light);
+  font-weight: 600;
+}
+
+.settings-row input[type="range"] {
+  width: 100%;
+  accent-color: var(--gold);
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--white);
+  cursor: pointer;
+}
+
+.toggle-row input {
+  accent-color: var(--gold);
+  width: 15px;
+  height: 15px;
+}
+
+.settings-status {
+  font-size: 12px;
+  color: var(--gray-200);
+}
+
 /* ─── Typing indicator ────────────────── */
 .typing-indicator {
   display: flex;
