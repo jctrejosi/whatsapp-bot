@@ -9,6 +9,8 @@ services:
     envVars:
       - key: DEEPSEEK_API_KEY
         sync: false
+      - key: DEEPSEEK_MODEL
+        sync: false
       - key: KNOWLEDGE_SERVICE_URL
         sync: false
       - key: WHATSAPP_APP_ID

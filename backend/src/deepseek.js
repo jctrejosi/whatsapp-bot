@@ -41,11 +41,11 @@ async function searchKnowledge(query) {
  * If the model returns tool_calls, execute them and call again with results.
  */
 async function callDeepSeek(messages, tools = null, attempt = 1) {
-  const { temperature, maxTokens } = getSettings();
+  const { temperature, maxTokens, model } = getSettings();
   const tokens = attempt === 1 ? maxTokens : attempt === 2 ? 2000 : 3000;
 
   const body = {
-    model: 'deepseek-v4-flash',
+    model,
     messages,
     temperature,
     max_tokens: tokens,
@@ -89,9 +89,10 @@ async function callDeepSeek(messages, tools = null, attempt = 1) {
       ...toolResults,
     ];
 
+    const { model } = getSettings();
     const retry = await axios.post(
       'https://api.deepseek.com/chat/completions',
-      { model: 'deepseek-v4-flash', messages: followUp, temperature: 0.7, max_tokens: 1500 },
+      { model, messages: followUp, temperature: 0.7, max_tokens: 1500 },
       { headers: DEEPSEEK_HEADERS }
     );
 

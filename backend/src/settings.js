@@ -37,6 +37,9 @@ function envDefaults() {
     // Creatividad del modelo
     temperature: 0.7,
 
+    // Modelo DeepSeek usado para el chat (flash = rápido, deepseek-chat = Pro)
+    model: process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash',
+
     // Tokens máximos de la primera respuesta
     maxTokens: 1200,
 
@@ -48,10 +51,13 @@ function envDefaults() {
   };
 }
 
+const ALLOWED_MODELS = ['deepseek-v4-flash', 'deepseek-chat', 'deepseek-v3', 'deepseek-v3-lite', 'deepseek-r1'];
+
 const VALIDATORS = {
   escalationEmails: (v) =>
     Array.isArray(v) && v.length > 0 && v.every((e) => typeof e === 'string' && EMAIL_RE.test(e.trim())),
   senderEmail: (v) => typeof v === 'string' && EMAIL_RE.test(v.trim()),
+  model: (v) => typeof v === 'string' && ALLOWED_MODELS.includes(v),
   minConfidence: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1,
   maxNegativeResponses: (v) => Number.isInteger(v) && v >= 0 && v <= 100,
   temperature: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 2,

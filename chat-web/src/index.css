@@ -515,6 +515,7 @@ body {
 }
 
 .email-add input,
+.model-select,
 .settings-row input[type="number"] {
   flex: 1;
   padding: 8px 10px;
@@ -524,6 +525,15 @@ body {
   color: var(--white);
   font-size: 13px;
   outline: none;
+}
+
+.model-select {
+  width: 100%;
+  cursor: pointer;
+}
+
+.model-select:focus {
+  border-color: var(--gold);
 }
 
 .email-add input:focus {

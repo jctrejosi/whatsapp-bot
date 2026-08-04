@@ -391,7 +391,7 @@ function SettingsPanel({ open, onClose }) {
     setMsg('');
     try {
       setSettings(await updateSettings(settings));
-      setMsg('✅ Configuración guardada');
+      onClose();
     } catch (e) {
       setMsg('❌ ' + e.message);
     } finally {
@@ -488,6 +488,23 @@ function SettingsPanel({ open, onClose }) {
 
           <div className="settings-section">
             <h3>🎛️ Sensibilidad y calidad de respuestas</h3>
+            <div className="settings-row">
+              <div className="row-top">
+                <label>Modelo DeepSeek</label>
+                <span className="value">{settings.model}</span>
+              </div>
+              <select
+                className="model-select"
+                value={settings.model}
+                onChange={(e) => set('model', e.target.value)}
+              >
+                <option value="deepseek-v4-flash">⚡ DeepSeek V4 Flash (rápido)</option>
+                <option value="deepseek-v3">📦 DeepSeek V3</option>
+                <option value="deepseek-v3-lite">💨 DeepSeek V3 Lite</option>
+                <option value="deepseek-r1">🧠 DeepSeek R1 (razonamiento)</option>
+                <option value="deepseek-chat">💬 DeepSeek Chat (V4 Pro)</option>
+              </select>
+            </div>
             <SliderRow
               label="Creatividad (temperature)"
               hint="Más alto = respuestas más variadas y naturales; más bajo = más consistentes."
