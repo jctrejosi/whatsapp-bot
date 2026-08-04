@@ -1,14 +1,8 @@
 // ============================================================================
-// Configuración en runtime — persistida en data/settings.json
-// (editable desde el dashboard de administración).
-//
-// Precedencia: data/settings.json  >  variables de entorno  >  defaults
+// Configuración en runtime — persistida en PostgreSQL (tabla bot_settings).
+// Precedencia: bot_settings (DB) > variables de entorno > defaults.
 // ============================================================================
-const fs = require('fs');
-const path = require('path');
-
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
+const { query } = require('./db');
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -18,20 +12,11 @@ function splitEmails(raw) {
   return list.length > 0 ? list : null;
 }
 
-// Valores que replican el comportamiento original del código (usados cuando
-// ni el archivo de settings ni las env vars proveen un valor).
 function envDefaults() {
   return {
-    // Correos de los asesores que reciben la notificación de escalación
     escalationEmails: splitEmails(process.env.ESCALATION_EMAIL) || ['juanktrejos15@gmail.com'],
-
-    // Remitente usado en los correos (debe pertenecer a un dominio verificado en Resend)
     senderEmail: process.env.RESEND_SENDER_EMAIL || 'onboarding@resend.dev',
-
-    // API key de Resend (también configurable desde env: RESEND_API_KEY)
     resendApiKey: process.env.RESEND_API_KEY || '',
-
-    // WhatsApp (por bot, hereda del env global si no se configura)
     whatsappAppId: process.env.WHATSAPP_APP_ID || '',
     whatsappAppSecret: process.env.WHATSAPP_APP_SECRET || '',
     whatsappWabaId: process.env.WHATSAPP_WABA_ID || '',
@@ -39,29 +24,13 @@ function envDefaults() {
     whatsappAccessToken: process.env.WHATSAPP_ACCESS_TOKEN || '',
     whatsappVerifyToken: process.env.WHATSAPP_VERIFY_TOKEN || '',
     whatsappPhone: process.env.WHATSAPP_PHONE || '',
-
-    // Similitud mínima (0-1) para considerar un fragmento relevante en la búsqueda
     minConfidence: parseFloat(process.env.MIN_CONFIDENCE || '0'),
-
-    // Intentos seguidos sin respuesta clara antes de ofrecer hablar con un asesor (0 = desactivado)
     maxNegativeResponses: parseInt(process.env.MAX_NEGATIVE_RESPONSES || '5', 10),
-
-    // Creatividad del modelo
     temperature: 0.7,
-
-    // Modelo DeepSeek usado para el chat (flash = rápido, deepseek-chat = Pro)
     model: process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash',
-
-    // Tokens máximos de la primera respuesta
     maxTokens: parseInt(process.env.MAX_TOKENS || '2000', 10),
-
-    // Fragmentos de conocimiento usados por respuesta
     topK: 3,
-
-    // Mensajes de historial (turnos) que se envían como contexto en cada pregunta
     maxHistoryMessages: parseInt(process.env.MAX_HISTORY_MESSAGES || '6', 10),
-
-    // Usar DeepSeek V4 Pro como reranker de los resultados
     useReranker: true,
   };
 }
@@ -92,42 +61,46 @@ const VALIDATORS = {
 
 const settingsCache = new Map(); // key: botId || '__global__'
 
-function getSettingsFile(botId) {
-  if (botId) return path.join(DATA_DIR, `bot-${botId}`, 'settings.json');
-  return SETTINGS_FILE;
-}
-
-function load(botId) {
-  const file = getSettingsFile(botId);
+/** Carga settings desde DB, con fallback a env defaults. */
+async function load(botId) {
   try {
-    if (fs.existsSync(file)) {
-      return { ...envDefaults(), ...JSON.parse(fs.readFileSync(file, 'utf8')) };
+    const { rows } = await query(
+      'SELECT settings FROM bot_settings WHERE bot_id IS NOT DISTINCT FROM $1',
+      [botId || null]
+    );
+    if (rows.length > 0) {
+      return { ...envDefaults(), ...rows[0].settings };
     }
   } catch (err) {
-    console.warn(`No se pudo leer ${file}, usando defaults:`, err.message);
+    console.warn(`No se pudo leer settings para ${botId || 'global'} desde DB:`, err.message);
   }
   return envDefaults();
 }
 
-function persist(botId, data) {
-  const file = getSettingsFile(botId);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
+/** Persiste settings en DB (upsert). */
+async function persist(botId, data) {
+  await query(
+    `INSERT INTO bot_settings (bot_id, settings)
+     VALUES ($1, $2)
+     ON CONFLICT (bot_id) WHERE bot_id IS NOT DISTINCT FROM $1
+     DO UPDATE SET settings = $2, updated_at = NOW()`,
+    [botId || null, JSON.stringify(data)]
+  );
 }
 
 function cacheKey(botId) { return botId || '__global__'; }
 
 /** Copia de los settings actuales (nunca una referencia mutable). */
-function getSettings(botId) {
+async function getSettings(botId) {
   const key = cacheKey(botId);
-  if (!settingsCache.has(key)) settingsCache.set(key, load(botId));
+  if (!settingsCache.has(key)) settingsCache.set(key, await load(botId));
   return { ...settingsCache.get(key) };
 }
 
 /** Aplica y persiste un subconjunto de settings. Lanza Error si algo es inválido. */
-function updateSettings(botId, patch = {}) {
+async function updateSettings(botId, patch = {}) {
   const key = cacheKey(botId);
-  const current = getSettings(botId);
+  const current = await getSettings(botId);
   const next = { ...current };
 
   for (const [k, v] of Object.entries(patch)) {
@@ -137,19 +110,18 @@ function updateSettings(botId, patch = {}) {
   }
 
   settingsCache.set(key, next);
-  persist(botId, next);
-  return getSettings(botId);
+  await persist(botId, next);
+  return await getSettings(botId);
 }
 
-/** Elimina el archivo y vuelve a env vars / defaults. */
-function resetSettings(botId) {
-  try {
-    fs.rmSync(getSettingsFile(botId), { force: true });
-  } catch (err) {
-    console.warn(`No se pudo eliminar archivo de settings:`, err.message);
-  }
+/** Elimina los settings persistidos y vuelve a env defaults. */
+async function resetSettings(botId) {
+  await query(
+    'DELETE FROM bot_settings WHERE bot_id IS NOT DISTINCT FROM $1',
+    [botId || null]
+  );
   settingsCache.delete(cacheKey(botId));
-  return getSettings(botId);
+  return await getSettings(botId);
 }
 
 /** Limpia la caché de settings para un bot (al eliminarlo). */
@@ -157,4 +129,4 @@ function clearSettingsCache(botId) {
   settingsCache.delete(cacheKey(botId));
 }
 
-module.exports = { getSettings, updateSettings, resetSettings, clearSettingsCache, SETTINGS_FILE };
+module.exports = { getSettings, updateSettings, resetSettings, clearSettingsCache };

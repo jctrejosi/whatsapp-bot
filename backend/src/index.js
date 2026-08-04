@@ -170,15 +170,15 @@ app.get('/logs', (req, res) => {
 
 // ─── Bots (multi-bot platform) ────────────────────────────────────────
 
-app.get('/bots', (req, res) => {
-  res.json(listBots());
+app.get('/bots', async (req, res) => {
+  res.json(await listBots());
 });
 
-app.post('/bots', (req, res) => {
+app.post('/bots', async (req, res) => {
   try {
     const { name, description } = req.body || {};
     if (!name || !name.trim()) return res.status(400).json({ error: 'name es requerido' });
-    const result = createBot({ name, description });
+    const result = await createBot({ name, description });
     res.status(201).json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -187,7 +187,7 @@ app.post('/bots', (req, res) => {
 
 app.put('/bots/:id', (req, res) => {
   try {
-    res.json(updateBot(req.params.id, req.body || {}));
+    res.json(await updateBot(req.params.id, req.body || {}));
   } catch (err) {
     res.status(404).json({ error: err.message });
   }
@@ -195,7 +195,7 @@ app.put('/bots/:id', (req, res) => {
 
 app.delete('/bots/:id', (req, res) => {
   try {
-    deleteBot(req.params.id);
+    await deleteBot(req.params.id);
     res.json({ ok: true });
   } catch (err) {
     res.status(404).json({ error: err.message });
@@ -204,20 +204,20 @@ app.delete('/bots/:id', (req, res) => {
 
 // ─── Per-bot settings ─────────────────────────────────────────────────
 
-app.get('/bots/:id/settings', (req, res) => {
-  res.json(getSettings(req.params.id));
+app.get('/bots/:id/settings', async (req, res) => {
+  res.json(await getSettings(req.params.id));
 });
 
 app.put('/bots/:id/settings', (req, res) => {
   try {
-    res.json(updateSettings(req.params.id, req.body || {}));
+    res.json(await updateSettings(req.params.id, req.body || {}));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
-app.post('/bots/:id/settings/reset', (req, res) => {
-  res.json(resetSettings(req.params.id));
+app.post('/bots/:id/settings/reset', async (req, res) => {
+  res.json(await resetSettings(req.params.id));
 });
 
 app.post('/bots/:id/settings/test-email', async (req, res) => {
@@ -300,17 +300,17 @@ app.post('/bots/:id/chat', async (req, res) => {
 // ─── Global settings (backward compat + global defaults) ────────────────
 
 // GET /settings — current global configuration
-app.get('/settings', (req, res) => { res.json(getSettings()); });
+app.get('/settings', async (req, res) => { res.json(await getSettings()); });
 
 // PUT /settings — validate and apply a subset of global settings
 app.put('/settings', (req, res) => {
-  try { res.json(updateSettings(null, req.body || {})); }
+  try { res.json(await updateSettings(null, req.body || {})); }
   catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 // POST /settings/reset
 app.post('/settings/reset', (req, res) => {
-  try { res.json(resetSettings()); }
+  try { res.json(await resetSettings()); }
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 

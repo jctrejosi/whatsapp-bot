@@ -1,73 +1,77 @@
 // ============================================================================
-// Gestión de bots — persistencia en data/bots.json + settings por bot
+// Gestión de bots — persistencia en PostgreSQL (tabla bots).
 // ============================================================================
-const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
+const { query } = require('./db');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const BOTS_FILE = path.join(DATA_DIR, 'bots.json');
-
-function load() {
-  try {
-    if (fs.existsSync(BOTS_FILE)) return JSON.parse(fs.readFileSync(BOTS_FILE, 'utf8'));
-  } catch (e) { /* corrupto, se regenera */ }
-  return [];
+/** Lista todos los bots. */
+async function listBots() {
+  const { rows } = await query('SELECT id, name, description, created_at FROM bots ORDER BY created_at DESC');
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    description: r.description,
+    createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at,
+  }));
 }
 
-function save(bots) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(BOTS_FILE, JSON.stringify(bots, null, 2));
-}
+/** Crea un bot nuevo e inicializa sus settings por defecto. */
+async function createBot({ name, description = '' }) {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
 
-/** Lista todos los bots (sin datos sensibles). */
-function listBots() {
-  return load().map((b) => ({ id: b.id, name: b.name, description: b.description, createdAt: b.createdAt }));
-}
+  await query(
+    'INSERT INTO bots (id, name, description, created_at) VALUES ($1, $2, $3, $4)',
+    [id, name.trim(), description.trim(), now]
+  );
 
-/** Crea un bot nuevo y inicializa sus settings por defecto. */
-function createBot({ name, description = '' }) {
-  const bots = load();
-  const bot = {
-    id: crypto.randomUUID(),
-    name: name.trim(),
-    description: description.trim(),
-    createdAt: new Date().toISOString(),
-  };
-  bots.push(bot);
-  save(bots);
-
-  // Inicializa settings por defecto para este bot (hereda del global si existe)
+  // Inicializa settings por defecto (hereda del global)
   const { getSettings } = require('./settings');
-  const globalSettings = getSettings();
-  const botSettings = getSettings(bot.id);
-  // Mezcla: global defaults + cualquier override del bot (inicialmente nada)
-  getSettings(bot.id); // touch para crear archivo con defaults
+  await getSettings(id); // touch para crear la fila con defaults
 
-  return { bot, settings: botSettings };
+  const settings = await getSettings(id);
+  return { bot: { id, name: name.trim(), description: description.trim(), createdAt: now }, settings };
 }
 
-/** Elimina un bot y sus settings. */
-function deleteBot(id) {
-  const bots = load().filter((b) => b.id !== id);
-  save(bots);
-  const dir = path.join(DATA_DIR, `bot-${id}`);
-  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-  // Limpia caché de settings
+/** Elimina un bot y sus settings (CASCADE lo hace automático). */
+async function deleteBot(id) {
+  const result = await query('DELETE FROM bots WHERE id = $1', [id]);
+  if (result.rowCount === 0) throw new Error('Bot no encontrado');
+
   const { clearSettingsCache } = require('./settings');
   clearSettingsCache(id);
-  return true;
 }
 
 /** Actualiza nombre/descripción de un bot. */
-function updateBot(id, { name, description }) {
-  const bots = load();
-  const bot = bots.find((b) => b.id === id);
-  if (!bot) throw new Error('Bot no encontrado');
-  if (name !== undefined) bot.name = name.trim();
-  if (description !== undefined) bot.description = (description || '').trim();
-  save(bots);
-  return bot;
+async function updateBot(id, { name, description }) {
+  const sets = [];
+  const params = [];
+  let p = 1;
+
+  if (name !== undefined) {
+    sets.push(`name = $${p++}`);
+    params.push(name.trim());
+  }
+  if (description !== undefined) {
+    sets.push(`description = $${p++}`);
+    params.push((description || '').trim());
+  }
+
+  if (sets.length === 0) {
+    const { rows } = await query('SELECT id, name, description, created_at FROM bots WHERE id = $1', [id]);
+    if (rows.length === 0) throw new Error('Bot no encontrado');
+    return rows[0];
+  }
+
+  params.push(id);
+  const { rows } = await query(
+    `UPDATE bots SET ${sets.join(', ')} WHERE id = $${p} RETURNING id, name, description, created_at`,
+    params
+  );
+
+  if (rows.length === 0) throw new Error('Bot no encontrado');
+  const r = rows[0];
+  return { id: r.id, name: r.name, description: r.description, createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at };
 }
 
 module.exports = { listBots, createBot, deleteBot, updateBot };
