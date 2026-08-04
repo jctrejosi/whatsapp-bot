@@ -1,5 +1,6 @@
 const axios = require('axios');
 const { getSettings } = require('./settings');
+const { log } = require('./logger');
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const SENDER_NAME = 'Quinceañera Bot';
@@ -91,13 +92,13 @@ function resetNegative(userId) {
  */
 async function sendEscalationEmail({ userId, userName, query, history, reason }) {
   if (!RESEND_API_KEY) {
-    console.warn('RESEND_API_KEY no configurada — email no enviado');
+    log('warn', 'RESEND_API_KEY no configurada — email no enviado');
     return { ok: false, results: [], error: 'RESEND_API_KEY no configurada' };
   }
 
   const { escalationEmails, senderEmail } = getSettings();
   if (!escalationEmails || escalationEmails.length === 0) {
-    console.warn('No hay correos de asesores configurados — email no enviado');
+    log('warn', 'No hay correos de asesores configurados — email no enviado');
     return { ok: false, results: [], error: 'No hay correos de asesores configurados' };
   }
 
@@ -150,8 +151,8 @@ async function sendEscalationEmail({ userId, userName, query, history, reason })
   }));
 
   results.forEach((r) => {
-    if (r.ok) console.log(`Email de escalación enviado a ${r.to}`);
-    else console.error(`Error enviando email a ${r.to}:`, r.error);
+    if (r.ok) log('info', `Email de escalación enviado a ${r.to}`, { userId, reason });
+    else log('error', `Error enviando email a ${r.to}`, { to: r.to, error: r.error });
   });
 
   return { ok: results.some((r) => r.ok), results };

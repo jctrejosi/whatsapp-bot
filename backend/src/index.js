@@ -6,6 +6,7 @@ const { sendMessage, markAsRead } = require('./whatsapp');
 const { chatWithDeepSeek } = require('./deepseek');
 const { getSettings, updateSettings, resetSettings } = require('./settings');
 const { sendEscalationEmail } = require('./escalation');
+const { getLogs } = require('./logger');
 
 const app = express();
 
@@ -157,6 +158,13 @@ app.get('/conversations/:userId', async (req, res) => {
     console.error(`Proxy /conversations FAILED: ${e.code || e.message}`);
     res.status(502).json({ error: knowledgeError(`/conversations/${req.params.userId}`) });
   }
+});
+
+// ─── Logs (diagnóstico en producción) ──────────────────────────────────
+
+app.get('/logs', (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
+  res.json({ count: Math.min(limit, getLogs().length), logs: getLogs().slice(0, limit) });
 });
 
 // ─── Settings (admin dashboard) ─────────────────────────────────────────

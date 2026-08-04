@@ -615,6 +615,69 @@ body {
   color: var(--gray-200);
 }
 
+/* ─── Logs panel ──────────────────────── */
+.logs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.log-entry {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.log-entry.log-error {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+.log-entry.log-warn {
+  background: rgba(200, 169, 81, 0.06);
+  border-color: rgba(200, 169, 81, 0.15);
+}
+
+.log-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 3px;
+}
+
+.log-level {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: var(--navy);
+  background: var(--gray-200);
+}
+
+.log-level.log-info { background: #22c55e; color: var(--navy); }
+.log-level.log-warn { background: var(--gold); color: var(--navy); }
+.log-level.log-error { background: #ef4444; color: #fff; }
+
+.log-time {
+  font-size: 10px;
+  color: var(--gray-200);
+}
+
+.log-message {
+  color: var(--white);
+  line-height: 1.4;
+}
+
+.log-detail {
+  font-size: 10px;
+  color: var(--gray-200);
+  margin-top: 2px;
+}
+
 /* ─── Typing indicator ────────────────── */
 .typing-indicator {
   display: flex;

@@ -123,7 +123,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     return {
       answer: emailResult.ok
         ? '¡Listo! Ya notifiqué a nuestro equipo. Te contactarán pronto. ¿Necesitas algo más mientras tanto? 😊'
-        : 'Lo siento, hubo un problema al notificar a nuestro equipo. Por favor intenta contactarnos directamente. 😕',
+        : `Lo siento, hubo un problema al notificar a nuestro equipo: ${emailResult.error || 'error desconocido'}. 😕`,
       chunks: [], escalated: emailResult.ok,
     };
   }
@@ -165,7 +165,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     return {
       answer: emailResult.ok
         ? '¡Listo! Ya notifiqué a nuestro equipo. Te contactarán pronto. ¿Necesitas algo más mientras tanto? 😊'
-        : 'Lo siento, hubo un problema al notificar a nuestro equipo. Por favor intenta contactarnos directamente. 😕',
+        : `Lo siento, hubo un problema al notificar a nuestro equipo: ${emailResult.error || 'error desconocido'}. 😕`,
       chunks: relevantChunks, escalated: emailResult.ok,
     };
   }
