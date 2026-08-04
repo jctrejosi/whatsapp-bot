@@ -119,10 +119,12 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
   // ── Escalation: only when user explicitly asks ───────────────────
   const pendingCheck = checkPendingEscalation(userId, userMessage);
   if (pendingCheck.pending && pendingCheck.confirm) {
-    sendEscalationEmail(pendingCheck.escalationData);
+    const emailResult = await sendEscalationEmail(pendingCheck.escalationData);
     return {
-      answer: '¡Listo! Ya notifiqué a nuestro equipo. Te contactarán pronto. ¿Necesitas algo más mientras tanto? 😊',
-      chunks: [], escalated: true,
+      answer: emailResult.ok
+        ? '¡Listo! Ya notifiqué a nuestro equipo. Te contactarán pronto. ¿Necesitas algo más mientras tanto? 😊'
+        : 'Lo siento, hubo un problema al notificar a nuestro equipo. Por favor intenta contactarnos directamente. 😕',
+      chunks: [], escalated: emailResult.ok,
     };
   }
 
@@ -155,14 +157,16 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
 
   // ── Check if user explicitly asks for an advisor (auto-send, no confirmation) ──
   if (shouldEscalate(userId, userMessage, relevantChunks).escalate) {
-    sendEscalationEmail({
+    const emailResult = await sendEscalationEmail({
       userId, userName, query: userMessage,
       reason: 'Cliente solicitó asesor',
       history: historySnapshot,
     });
     return {
-      answer: '¡Listo! Ya notifiqué a nuestro equipo. Te contactarán pronto. ¿Necesitas algo más mientras tanto? 😊',
-      chunks: relevantChunks, escalated: true,
+      answer: emailResult.ok
+        ? '¡Listo! Ya notifiqué a nuestro equipo. Te contactarán pronto. ¿Necesitas algo más mientras tanto? 😊'
+        : 'Lo siento, hubo un problema al notificar a nuestro equipo. Por favor intenta contactarnos directamente. 😕',
+      chunks: relevantChunks, escalated: emailResult.ok,
     };
   }
 

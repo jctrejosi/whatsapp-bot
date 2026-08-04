@@ -262,7 +262,7 @@ function UploadPanel({ onRefresh }) {
 }
 
 /* ─── Source List ─────────────────────── */
-function SourceList() {
+function SourceList({ refreshKey }) {
   const [sources, setSources] = useState([]);
   const [selectedSource, setSelectedSource] = useState(null);
   const [sourceDetail, setSourceDetail] = useState(null);
@@ -277,11 +277,10 @@ function SourceList() {
     }
   }, []);
 
+  // Carga al montar y cuando se pide refresco (subida de PDF o botón ↻)
   useEffect(() => {
     loadSources();
-    const interval = setInterval(loadSources, 10000);
-    return () => clearInterval(interval);
-  }, [loadSources]);
+  }, [loadSources, refreshKey]);
 
   const handleSelect = async (source) => {
     if (selectedSource?.id === source.id) {
@@ -308,8 +307,11 @@ function SourceList() {
 
   return (
     <>
-      <div className="sidebar-section">
+      <div className="sidebar-section source-header">
         <h3>📚 Base de conocimiento ({sources.length})</h3>
+        <button className="btn btn-secondary btn-sm" onClick={loadSources} title="Refrescar lista">
+          ↻
+        </button>
       </div>
       <div className="source-list">
         {sources.length === 0 && (
@@ -615,6 +617,7 @@ export default function App() {
   const [online, setOnline] = useState(null);
   const [error, setError] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sourcesVersion, setSourcesVersion] = useState(0);
 
   useEffect(() => {
     const check = async () => {
@@ -628,9 +631,10 @@ export default function App() {
         setError('');
       }
     };
+    // Al cargar y al volver a la pestaña (sin polling continuo)
     check();
-    const interval = setInterval(check, 15000);
-    return () => clearInterval(interval);
+    window.addEventListener('focus', check);
+    return () => window.removeEventListener('focus', check);
   }, []);
 
   return (
@@ -641,8 +645,8 @@ export default function App() {
             ⚙️ Configuración
           </button>
         </div>
-        <UploadPanel onRefresh={() => {}} />
-        <SourceList />
+        <UploadPanel onRefresh={() => setSourcesVersion((v) => v + 1)} />
+        <SourceList refreshKey={sourcesVersion} />
       </aside>
       <main className="main">
         <Header status={online} error={error} />
