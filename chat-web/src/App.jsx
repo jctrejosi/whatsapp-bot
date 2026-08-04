@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { chat, getSources, getSource, ingestPdf, healthCheck, getSettings, updateSettings, resetSettings, sendTestEmail, getLogs } from './api.js';
+import { chat, getSources, getSource, ingestPdf, healthCheck, getSettings, updateSettings, resetSettings, sendTestEmail } from './api.js';
 
 /* ─── Message Bubble ──────────────────── */
 function MessageBubble({ msg }) {
@@ -593,61 +593,6 @@ function SettingsPanel({ open, onClose }) {
   );
 }
 
-/* ─── Logs Panel ──────────────────────── */
-function LogsPanel({ open, onClose }) {
-  const [logs, setLogs] = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    getLogs(80).then(setLogs).catch(() => {});
-  }, [open]);
-
-  const refresh = async () => {
-    setLoading(true);
-    try { setLogs(await getLogs(80)); } catch {}
-    finally { setLoading(false); }
-  };
-
-  if (!open) return null;
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>📋 Logs del backend</h2>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-secondary btn-sm" onClick={refresh} disabled={loading}>
-              {loading ? 'Cargando...' : '↻ Refrescar'}
-            </button>
-            <button className="btn btn-secondary btn-sm" onClick={onClose}>✕</button>
-          </div>
-        </div>
-        <div className="modal-body">
-          <div className="logs-list">
-            {logs.length === 0 && (
-              <p className="settings-hint">No hay logs aún. Los eventos de envío de correo y errores aparecerán aquí.</p>
-            )}
-            {logs.map((entry, i) => (
-              <div key={i} className={`log-entry log-${entry.level}`}>
-                <div className="log-header">
-                  <span className={`log-level log-${entry.level}`}>{entry.level.toUpperCase()}</span>
-                  <span className="log-time">{entry.timestamp}</span>
-                </div>
-                <div className="log-message">{entry.message}</div>
-                {entry.error && <div className="log-detail">Error: {entry.error}</div>}
-                {entry.to && <div className="log-detail">Para: {entry.to}</div>}
-                {entry.userId && <div className="log-detail">Usuario: {entry.userId}</div>}
-                {entry.reason && <div className="log-detail">Motivo: {entry.reason}</div>}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /* ─── Header ──────────────────────────── */
 function Header({ status, error }) {
   const label =
@@ -672,7 +617,6 @@ export default function App() {
   const [online, setOnline] = useState(null);
   const [error, setError] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [logsOpen, setLogsOpen] = useState(false);
   const [sourcesVersion, setSourcesVersion] = useState(0);
 
   useEffect(() => {
@@ -698,13 +642,6 @@ export default function App() {
           <button className="btn btn-secondary btn-block" onClick={() => setSettingsOpen(true)}>
             ⚙️ Configuración
           </button>
-          <button
-            className="btn btn-secondary btn-block"
-            style={{ marginTop: 6 }}
-            onClick={() => setLogsOpen(true)}
-          >
-            📋 Logs
-          </button>
         </div>
         <UploadPanel onRefresh={() => setSourcesVersion((v) => v + 1)} />
         <SourceList refreshKey={sourcesVersion} />
@@ -714,7 +651,6 @@ export default function App() {
         <ChatPanel online={online === true} />
       </main>
       <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      <LogsPanel open={logsOpen} onClose={() => setLogsOpen(false)} />
     </div>
   );
 }

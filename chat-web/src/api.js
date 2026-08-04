@@ -72,8 +72,3 @@ export async function sendTestEmail() {
   const res = await fetch(`${API_URL}/settings/test-email`, { method: 'POST' });
   return handleResponse(res, `Error ${res.status} al enviar correo de prueba`);
 }
-
-export async function getLogs(limit = 50) {
-  const res = await fetch(`${API_URL}/logs?limit=${limit}`);
-  return handleResponse(res, `Error ${res.status} al cargar logs`);
-}
