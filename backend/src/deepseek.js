@@ -42,7 +42,8 @@ async function searchKnowledge(query) {
  */
 async function callDeepSeek(messages, tools = null, attempt = 1) {
   const { temperature, maxTokens, model } = getSettings();
-  const tokens = attempt === 1 ? maxTokens : attempt === 2 ? 2000 : 3000;
+  // Escala: primer intento = maxTokens; 2º = x1.7; 3º = x2.5
+  const tokens = Math.round(maxTokens * (attempt === 1 ? 1 : attempt === 2 ? 1.7 : 2.5));
 
   const body = {
     model,
@@ -68,12 +69,14 @@ async function callDeepSeek(messages, tools = null, attempt = 1) {
 
     // Execute functions and collect results
     const toolResults = [];
+    let escalate = null;
     for (const toolCall of msg.tool_calls) {
       const fn = FUNCTION_MAP[toolCall.function.name];
       if (fn) {
         const args = JSON.parse(toolCall.function.arguments || '{}');
         const result = fn(args);
         console.log(`  → ${toolCall.function.name}(${JSON.stringify(args)}) = OK`);
+        if (result._escalate && !escalate) escalate = result.lead || {};
         toolResults.push({
           role: 'tool',
           tool_call_id: toolCall.id,
@@ -89,14 +92,19 @@ async function callDeepSeek(messages, tools = null, attempt = 1) {
       ...toolResults,
     ];
 
-    const { model } = getSettings();
+    const { model, maxTokens } = getSettings();
     const retry = await axios.post(
       'https://api.deepseek.com/chat/completions',
-      { model, messages: followUp, temperature: 0.7, max_tokens: 1500 },
+      { model, messages: followUp, temperature: 0.7, max_tokens: Math.max(2500, maxTokens) },
       { headers: DEEPSEEK_HEADERS }
     );
 
-    return retry.data.choices[0].message;
+    const finalMsg = retry.data.choices[0].message;
+    if (escalate) {
+      finalMsg._escalate = true;
+      finalMsg._escalateData = escalate;
+    }
+    return finalMsg;
   }
 
   return msg;
@@ -190,12 +198,16 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
       '- Para fechas de pago y cancelaciones \u2192 usa obtener_fechas_pago\n' +
       '- Para la lista de qu\u00e9 incluye el paquete \u2192 usa obtener_que_incluye\n' +
       '- Para el itinerario d\u00eda por d\u00eda \u2192 usa obtener_itinerario\n' +
+      '- Cuando el cliente muestra intención de comprar, dice "estoy de acuerdo", "me gusta el precio", "perfecto", "¿cómo reservo?", "¿cómo sigo?" o frases similares \u2192 PRIMERO pide sus datos (nombre, teléfono o correo) y cuántas personas viajarán. Cuando los tengas, usa iniciar_cierre_venta.\n' +
       '- Para TODO lo dem\u00e1s: compara, explica, recomienda, resume usando los DATOS DEL EVENTO.\n\n' +
       'DATOS DEL EVENTO:\n' + context;
   } else {
     systemPrompt =
-      'Eres Ana, asesora de Angela\'s Vacations LLC. Responde en español, con calidez.\n' +
-      'No tienes acceso a la información. Pide disculpas y sugiere intentar de nuevo.';
+      'Eres Ana, asesora de Angela\'s Vacations LLC. Responde en español, con calidez y entusiasmo.\n' +
+      'Aunque no tengas acceso a la base de conocimiento en este momento, tu prioridad es ayudar al cliente:\n' +
+      '- Si el cliente muestra intención clara de comprar o reservar \u2192 PRIMERO pide sus datos de contacto (nombre, teléfono o correo) y pregunta cuántas personas viajarán. Cuando te los dé, usa iniciar_cierre_venta.\n' +
+      '- Si pregunta por precios, dale rangos generales y ofrece el contacto con un asesor.\n' +
+      '- En TODOS los casos, responde de forma positiva y orientada a cerrar la venta.';
   }
 
   messages.push({ role: 'system', content: systemPrompt });
@@ -210,16 +222,53 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
 
   // 3. Call DeepSeek with function calling
   let content;
+  let escalated = false;
   try {
     const msg = await callDeepSeek(messages, TOOLS);
     content = msg.content;
+    if (msg._escalate) {
+      escalated = true;
+      const lead = msg._escalateData;
+      const reason = [
+        'Cierre de venta',
+        lead.nombre ? `— ${lead.nombre}` : '',
+        lead.telefono ? `📞 ${lead.telefono}` : '',
+        lead.email ? `✉️ ${lead.email}` : '',
+        lead.num_personas ? `👥 ${lead.num_personas} personas` : '',
+        lead.tipo_cabina ? `🛏️ ${lead.tipo_cabina}` : '',
+        lead.notas ? `📝 ${lead.notas}` : '',
+        lead.motivo ? `💬 ${lead.motivo}` : '',
+      ].filter(Boolean).join(' | ');
+      sendEscalationEmail({
+        userId, userName, query: userMessage,
+        reason,
+        history: historySnapshot,
+        type: 'sales',
+      });
+    }
   } catch (err) {
     console.error('DeepSeek error:', err.message);
     return { answer: 'Lo siento, tuve un problema técnico. ¿Puedes intentarlo de nuevo? 🙏', chunks: [], escalated: false };
   }
 
   if (!content || content.trim().length === 0) {
-    return { answer: 'Lo siento, no pude procesar tu mensaje. ¿Puedes intentarlo de nuevo?', chunks: [], escalated: false };
+    setPendingEscalation(userId, {
+      userId, userName, query: userMessage,
+      reason: 'Cliente listo para cerrar venta',
+      history: historySnapshot,
+    });
+    return { answer: '¡Gracias por tu interés! 😊 ¿Quieres que un asesor te contacte para ayudarte con la reserva? Responde "sí" y te conectamos.', chunks: [], escalated: false };
+  }
+
+  // Si el modelo respondió sin fragmentos de la base de conocimiento, sugiere
+  // contactar con un asesor (sin escalar automáticamente)
+  if (!escalated && content && (!relevantChunks || relevantChunks.length === 0)) {
+    setPendingEscalation(userId, {
+      userId, userName, query: userMessage,
+      reason: 'Información no encontrada en la base de conocimiento',
+      history: historySnapshot,
+    });
+    content += '\n\n💡 Si necesitas información más precisa o personalizada, un asesor puede ayudarte. ¿Quieres que te contactemos? Responde "sí" y te avisamos.';
   }
 
   // Save to history (depth y truncado para acotar tokens; profundidad configurable)
@@ -227,7 +276,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
   history.push({ role: 'assistant', text: content.substring(0, 800) });
   if (history.length > maxHistoryMessages) history.splice(0, history.length - maxHistoryMessages);
 
-  return { answer: content, chunks: relevantChunks, escalated: false };
+  return { answer: content, chunks: relevantChunks, escalated };
 }
 
 module.exports = { chatWithDeepSeek, searchKnowledge };

@@ -498,6 +498,15 @@ function SettingsPanel({ open, onClose }) {
                 onChange={(e) => set('senderEmail', e.target.value)}
               />
             </div>
+            <div className="email-add">
+              <span className="email-add-label">API Key</span>
+              <input
+                type="password"
+                placeholder="re_..."
+                value={settings.resendApiKey}
+                onChange={(e) => set('resendApiKey', e.target.value)}
+              />
+            </div>
             <p className="settings-hint">
               El remitente debe usar un dominio verificado en Resend. Puedes probar con
               onboarding@resend.dev mientras verificas tu dominio.
@@ -559,7 +568,7 @@ function SettingsPanel({ open, onClose }) {
               label="Máximo de tokens por respuesta"
               hint="Tope de la primera respuesta del modelo."
               value={settings.maxTokens}
-              min={256} max={4096} step={128}
+              min={256} max={8192} step={128}
               onChange={(v) => set('maxTokens', v)}
             />
             <SliderRow
@@ -594,7 +603,7 @@ function SettingsPanel({ open, onClose }) {
 }
 
 /* ─── Header ──────────────────────────── */
-function Header({ status, error }) {
+function Header({ status, error, onMenuToggle }) {
   const label =
     status === true ? '✅ API conectada' :
     status === false ? '🔴 ' + (error || 'API desconectada') :
@@ -607,6 +616,9 @@ function Header({ status, error }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
         {cls && <span className={`status-dot ${cls}`} />}
         <span style={{ color: 'var(--gray-200)' }}>{label}</span>
+        <button className="hamburger" onClick={onMenuToggle} aria-label="Menú">
+          ☰
+        </button>
       </div>
     </div>
   );
@@ -617,6 +629,7 @@ export default function App() {
   const [online, setOnline] = useState(null);
   const [error, setError] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sourcesVersion, setSourcesVersion] = useState(0);
 
   useEffect(() => {
@@ -637,9 +650,13 @@ export default function App() {
 
   return (
     <div className="layout">
-      <aside className="sidebar">
+      {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
+      <aside className={`sidebar${sidebarOpen ? ' open' : ''}`}>
+        <button className="sidebar-close" onClick={() => setSidebarOpen(false)} aria-label="Cerrar menú">
+          ✕
+        </button>
         <div className="sidebar-section">
-          <button className="btn btn-secondary btn-block" onClick={() => setSettingsOpen(true)}>
+          <button className="btn btn-secondary btn-block" onClick={() => { setSidebarOpen(false); setSettingsOpen(true); }}>
             ⚙️ Configuración
           </button>
         </div>
@@ -647,7 +664,7 @@ export default function App() {
         <SourceList refreshKey={sourcesVersion} />
       </aside>
       <main className="main">
-        <Header status={online} error={error} />
+        <Header status={online} error={error} onMenuToggle={() => setSidebarOpen((o) => !o)} />
         <ChatPanel online={online === true} />
       </main>
       <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />

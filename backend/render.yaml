@@ -39,3 +39,7 @@ services:
         sync: false
       - key: MAX_NEGATIVE_RESPONSES
         sync: false
+      - key: MAX_TOKENS
+        sync: false
+      - key: MAX_HISTORY_MESSAGES
+        sync: false

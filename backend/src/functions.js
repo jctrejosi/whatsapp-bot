@@ -117,6 +117,26 @@ function obtenerItinerario() {
   };
 }
 
+/**
+ * Sales closing — registers the lead and triggers escalation to a human advisor.
+ * The `_escalate` flag is detected by chatWithDeepSeek to send the email.
+ */
+function iniciarCierreVenta({ nombre, telefono, email, num_personas, tipo_cabina, notas, motivo }) {
+  return {
+    ok: true,
+    lead: {
+      nombre: nombre || '',
+      telefono: telefono || '',
+      email: email || '',
+      num_personas: num_personas || null,
+      tipo_cabina: tipo_cabina || '',
+      notas: notas || '',
+      motivo: motivo || 'Interesado en el crucero de Quinceañeras',
+    },
+    _escalate: true, // signal for chatWithDeepSeek to send escalation email
+  };
+}
+
 // ─── Function definitions for DeepSeek tool calling ──────────────────────
 
 const TOOLS = [
@@ -161,6 +181,25 @@ const TOOLS = [
       parameters: { type: 'object', properties: {} },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'iniciar_cierre_venta',
+      description: 'Usa esta función cuando el cliente está listo para comprar o reservar. IMPORTANTE: antes de llamarla, pídele al cliente sus datos de contacto (nombre y teléfono o correo). Si ya te los dio, procede. También pregunta cuántas personas viajarán y qué tipo de cabina prefiere.',
+      parameters: {
+        type: 'object',
+        properties: {
+          nombre:       { type: 'string', description: 'Nombre completo del cliente.' },
+          telefono:     { type: 'string', description: 'Teléfono de contacto.' },
+          email:        { type: 'string', description: 'Correo electrónico.' },
+          num_personas: { type: 'integer', description: 'Número total de personas.' },
+          tipo_cabina:  { type: 'string', enum: ['interior', 'oceanView', 'balcony'], description: 'Tipo de cabina.' },
+          notas:        { type: 'string', description: 'Notas adicionales.' },
+          motivo:       { type: 'string', description: 'Resumen breve de la solicitud del cliente.' },
+        },
+      },
+    },
+  },
 ];
 
 const FUNCTION_MAP = {
@@ -168,6 +207,7 @@ const FUNCTION_MAP = {
   obtener_fechas_pago: obtenerFechasPago,
   obtener_que_incluye: obtenerQueIncluye,
   obtener_itinerario: obtenerItinerario,
+  iniciar_cierre_venta: iniciarCierreVenta,
 };
 
 module.exports = { TOOLS, FUNCTION_MAP };

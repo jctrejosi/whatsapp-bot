@@ -2,7 +2,6 @@ const axios = require('axios');
 const { getSettings } = require('./settings');
 const { log } = require('./logger');
 
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const SENDER_NAME = 'Quinceañera Bot';
 
 // Track consecutive negative responses per user (in memory — resets on restart)
@@ -10,6 +9,10 @@ const negativeCounts = new Map();
 
 // Track pending escalations waiting for user confirmation
 const pendingEscalations = new Map();
+
+// Track last escalation email per user to avoid duplicates (in-memory)
+const lastEmailSent = new Map();
+const ESCALATION_COOLDOWN_MS = 60 * 1000; // 1 min
 
 // ─── Keywords that trigger immediate escalation ──────────────────────────
 
@@ -42,7 +45,6 @@ const ESCALATION_KEYWORDS = [
   'hablar con una persona',
   'hablar con un humano',
   'hablar con alguien de verdad',
-  'me gustaría contratar',
   'no me entiendes',
   'no sirves',
   'no me resuelves',
@@ -86,17 +88,37 @@ function resetNegative(userId) {
 
 // ─── Email-based escalation (Resend) ────────────────────────────────────
 
+// Icono y textos según el tipo de notificación
+const EMAIL_TYPES = {
+  advisor: { icon: '🚢', title: 'Escalación — Quinceañera Cruise Bot' },
+  sales:   { icon: '💰', title: 'Cierre de venta — Quinceañera Cruise Bot' },
+  test:    { icon: '🧪', title: 'Correo de prueba — Quinceañera Cruise Bot' },
+};
+
 /**
  * Send the escalation notification to ALL configured advisor emails.
- * @returns {Promise<{ ok: boolean, results: Array<{ to: string, ok: boolean, error: string|null }> }>}
+ * @param {object} opts - { userId, userName, query, history, reason, type }
+ *   type: 'advisor' (default) | 'sales' | 'test'
+ * @returns {Promise<{ ok: boolean, results: Array, skipped?: boolean }>}
  */
-async function sendEscalationEmail({ userId, userName, query, history, reason }) {
-  if (!RESEND_API_KEY) {
+async function sendEscalationEmail({ userId, userName, query, history, reason, type = 'advisor' }) {
+  // Cooldown por usuario: evita correos duplicados cuando el modelo llama
+  // iniciar_cierre_venta más de una vez en la misma conversación
+  const now = Date.now();
+  if (userId && now - (lastEmailSent.get(userId) || 0) < ESCALATION_COOLDOWN_MS) {
+    log('warn', `Escalación duplicada omitida para ${userId} (cooldown ${ESCALATION_COOLDOWN_MS / 1000}s)`);
+    return { ok: true, results: [], skipped: true };
+  }
+
+  const { escalationEmails, senderEmail, resendApiKey } = getSettings();
+
+  const meta = EMAIL_TYPES[type] || EMAIL_TYPES.advisor;
+
+  if (!resendApiKey) {
     log('warn', 'RESEND_API_KEY no configurada — email no enviado');
     return { ok: false, results: [], error: 'RESEND_API_KEY no configurada' };
   }
 
-  const { escalationEmails, senderEmail } = getSettings();
   if (!escalationEmails || escalationEmails.length === 0) {
     log('warn', 'No hay correos de asesores configurados — email no enviado');
     return { ok: false, results: [], error: 'No hay correos de asesores configurados' };
@@ -109,7 +131,7 @@ async function sendEscalationEmail({ userId, userName, query, history, reason })
     .join('\n\n');
 
   const html = `
-    <h2>🚢 Escalación — Quinceañera Cruise Bot</h2>
+    <h2>${meta.icon} ${meta.title}</h2>
     <p><strong>Motivo:</strong> ${reason}</p>
     <hr>
     <p><strong>Usuario:</strong> ${userName || 'Desconocido'} (${userId})</p>
@@ -121,6 +143,12 @@ async function sendEscalationEmail({ userId, userName, query, history, reason })
     <p style="color:#888;font-size:12px">Quinceañera Cruise Bot — Escalación automática</p>
   `;
 
+  // Asunto: menciona la solicitud del cliente (cierre de venta usa el motivo completo)
+  const subject =
+    type === 'sales'
+      ? `${meta.icon} ${reason.substring(0, 70)}`
+      : `${meta.icon} Solicitud de asesor: ${(query || reason).substring(0, 70)}`;
+
   const attempts = await Promise.allSettled(
     escalationEmails.map((to) =>
       axios.post(
@@ -128,12 +156,12 @@ async function sendEscalationEmail({ userId, userName, query, history, reason })
         {
           from,
           to,
-          subject: `🚢 Solicitud de asesor: ${(query || reason).substring(0, 70)}`,
+          subject,
           html,
         },
         {
           headers: {
-            Authorization: `Bearer ${RESEND_API_KEY}`,
+            Authorization: `Bearer ${resendApiKey}`,
             'Content-Type': 'application/json',
           },
         }
@@ -154,6 +182,9 @@ async function sendEscalationEmail({ userId, userName, query, history, reason })
     if (r.ok) log('info', `Email de escalación enviado a ${r.to}`, { userId, reason });
     else log('error', `Error enviando email a ${r.to}`, { to: r.to, error: r.error });
   });
+
+  // Registrar el envío solo si hubo éxito para activar el cooldown
+  if (results.some((r) => r.ok)) lastEmailSent.set(userId, now);
 
   return { ok: results.some((r) => r.ok), results };
 }

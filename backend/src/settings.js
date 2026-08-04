@@ -28,6 +28,9 @@ function envDefaults() {
     // Remitente usado en los correos (debe pertenecer a un dominio verificado en Resend)
     senderEmail: process.env.RESEND_SENDER_EMAIL || 'onboarding@resend.dev',
 
+    // API key de Resend (también configurable desde env: RESEND_API_KEY)
+    resendApiKey: process.env.RESEND_API_KEY || '',
+
     // Similitud mínima (0-1) para considerar un fragmento relevante en la búsqueda
     minConfidence: parseFloat(process.env.MIN_CONFIDENCE || '0'),
 
@@ -41,7 +44,7 @@ function envDefaults() {
     model: process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash',
 
     // Tokens máximos de la primera respuesta
-    maxTokens: 1200,
+    maxTokens: parseInt(process.env.MAX_TOKENS || '2000', 10),
 
     // Fragmentos de conocimiento usados por respuesta
     topK: 3,
@@ -68,6 +71,7 @@ const VALIDATORS = {
   topK: (v) => Number.isInteger(v) && v >= 1 && v <= 20,
   maxHistoryMessages: (v) => Number.isInteger(v) && v >= 1 && v <= 30,
   useReranker: (v) => typeof v === 'boolean',
+  resendApiKey: (v) => typeof v === 'string',
 };
 
 let settings;
