@@ -132,3 +132,18 @@ export async function deleteBotSource(id, sourceId) {
   const res = await fetch(`${API_URL}/bots/${id}/knowledge/${sourceId}`, { method: 'DELETE' });
   return handleResponse(res, `Error ${res.status} al eliminar fuente`);
 }
+
+/** URL de descarga del archivo original de una fuente (para <a href download>). */
+export function getBotSourceDownloadUrl(botId, sourceId) {
+  return `${API_URL}/bots/${botId}/knowledge/${sourceId}/download`;
+}
+
+export async function getModels() {
+  const res = await fetch(`${API_URL}/models`);
+  return handleResponse(res, `Error ${res.status} al cargar modelos`);
+}
+
+export async function getBotModels(id) {
+  const res = await fetch(`${API_URL}/bots/${id}/models`);
+  return handleResponse(res, `Error ${res.status} al cargar modelos`);
+}

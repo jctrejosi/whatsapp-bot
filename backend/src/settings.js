@@ -32,6 +32,7 @@ function envDefaults() {
     topK: 3,
     maxHistoryMessages: parseInt(process.env.MAX_HISTORY_MESSAGES || '6', 10),
     useReranker: true,
+    systemPrompt: '',
   };
 }
 
@@ -41,7 +42,11 @@ const VALIDATORS = {
   escalationEmails: (v) =>
     Array.isArray(v) && v.length > 0 && v.every((e) => typeof e === 'string' && EMAIL_RE.test(e.trim())),
   senderEmail: (v) => typeof v === 'string' && EMAIL_RE.test(v.trim()),
-  model: (v) => typeof v === 'string' && ALLOWED_MODELS.includes(v),
+  model: (v) =>
+    typeof v === 'string' &&
+    v.trim().length > 0 &&
+    v.trim().length <= 100 &&
+    /^[a-zA-Z0-9][a-zA-Z0-9._:-]*$/.test(v.trim()),
   minConfidence: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1,
   maxNegativeResponses: (v) => Number.isInteger(v) && v >= 0 && v <= 100,
   temperature: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 2,
@@ -57,6 +62,7 @@ const VALIDATORS = {
   whatsappAccessToken: (v) => typeof v === 'string',
   whatsappVerifyToken: (v) => typeof v === 'string',
   whatsappPhone: (v) => typeof v === 'string',
+  systemPrompt: (v) => typeof v === 'string',
 };
 
 const settingsCache = new Map(); // key: botId || '__global__'
@@ -129,4 +135,4 @@ function clearSettingsCache(botId) {
   settingsCache.delete(cacheKey(botId));
 }
 
-module.exports = { getSettings, updateSettings, resetSettings, clearSettingsCache };
+module.exports = { getSettings, updateSettings, resetSettings, clearSettingsCache, ALLOWED_MODELS };

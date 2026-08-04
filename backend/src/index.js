@@ -3,7 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { sendMessage, markAsRead } = require('./whatsapp');
-const { chatWithDeepSeek } = require('./deepseek');
+const { chatWithDeepSeek, listModels } = require('./deepseek');
 const { getSettings, updateSettings, resetSettings } = require('./settings');
 const { sendEscalationEmail } = require('./escalation');
 const { getLogs } = require('./logger');
@@ -207,6 +207,24 @@ app.delete('/bots/:id', async (req, res) => {
   }
 });
 
+// ─── DeepSeek models (disponibles para la API key) ──────────────
+
+app.get('/models', async (req, res) => {
+  try {
+    res.json({ models: await listModels() });
+  } catch (e) {
+    res.status(502).json({ error: 'No se pudieron consultar modelos' });
+  }
+});
+
+app.get('/bots/:id/models', async (req, res) => {
+  try {
+    res.json({ models: await listModels() });
+  } catch (e) {
+    res.status(502).json({ error: 'No se pudieron consultar modelos' });
+  }
+});
+
 // ─── Per-bot settings ─────────────────────────────────────────────────
 
 app.get('/bots/:id/settings', async (req, res) => {
@@ -296,7 +314,27 @@ app.delete('/bots/:id/knowledge/:sourceId', async (req, res) => {
   try {
     await knowledge.delete(`/sources/${req.params.sourceId}`);
     res.json({ ok: true });
-  } catch (e) { res.status(502).json({ error: knowledgeError('/sources') }); }
+  } catch (e) {
+    if (e.response?.status === 404) return res.status(404).json({ error: 'Fuente no encontrada' });
+    res.status(502).json({ error: knowledgeError('/sources') });
+  }
+});
+
+app.get('/bots/:id/knowledge/:sourceId/download', async (req, res) => {
+  try {
+    const upstream = await knowledge.get(`/sources/${req.params.sourceId}/download`, { responseType: 'stream' });
+    res.set('Content-Type', upstream.headers['content-type'] || 'application/octet-stream');
+    if (upstream.headers['content-disposition']) {
+      res.set('Content-Disposition', upstream.headers['content-disposition']);
+    }
+    upstream.data.pipe(res);
+  } catch (e) {
+    if (e.response?.status === 404) {
+      return res.status(404).json({ error: 'El archivo original no está disponible en este servidor' });
+    }
+    console.error('Download proxy FAILED:', e.code || e.message);
+    res.status(502).json({ error: knowledgeError(`/sources/${req.params.sourceId}/download`) });
+  }
 });
 
 app.post('/bots/:id/chat', async (req, res) => {

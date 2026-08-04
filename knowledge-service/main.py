@@ -12,18 +12,17 @@ Endpoints:
 import json
 import os
 import uuid
-import tempfile
 from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, File, HTTPException, UploadFile, Form
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from database import get_pool, close_pool, run_migrations
 from services.embedding import close_client
-from services.extraction import extract_pdf_bytes
+from services.extraction import extract_file_bytes
 from services.ingestion import run_ingestion
 from services.search import search_chunks
 
@@ -111,23 +110,28 @@ class ChatResponse(BaseModel):
 
 @app.post("/ingest", status_code=201)
 @app.post("/ingest")
-async def ingest_pdf(file: UploadFile = File(...), bot_id: str = Form(None)):
+async def ingest_file(file: UploadFile = File(...), bot_id: str = Form(None)):
     """
-    Upload a PDF file and trigger the full ingestion pipeline:
-    extract → chunk → embed → store in pgvector.
+    Upload a file (PDF, DOCX, XLSX, PPTX, CSV, TXT, code, etc.) and trigger the
+    full ingestion pipeline: extract → chunk → embed → store in pgvector.
     """
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(400, "Solo se aceptan archivos PDF")
+    if not file.filename:
+        raise HTTPException(400, "Archivo sin nombre")
 
     contents = await file.read()
+    file_type = file.content_type or "application/octet-stream"
+    ext = os.path.splitext(file.filename)[1].lower()
 
-    # Extract metadata from PDF bytes (in memory)
-    extract_result = extract_pdf_bytes(contents)
+    # Extract text from the file (auto-detects format)
+    extract_result = extract_file_bytes(contents, file.filename)
 
-    # Save bytes to a temp file just for the ingestion pipeline
-    fd, tmp_path = tempfile.mkstemp(suffix=".pdf")
-    os.write(fd, contents)
-    os.close(fd)
+    # Save bytes to a persistent uploads/ dir (so the file can be downloaded)
+    uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")
+    os.makedirs(uploads_dir, exist_ok=True)
+    safe_name = os.path.basename(file.filename or "upload.bin")
+    stored_path = os.path.join(uploads_dir, f"{uuid.uuid4().hex}_{safe_name}")
+    with open(stored_path, "wb") as f:
+        f.write(contents)
 
     pool = await get_pool()
 
@@ -141,22 +145,22 @@ async def ingest_pdf(file: UploadFile = File(...), bot_id: str = Form(None)):
             VALUES ($1, 'file', $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
             """,
             source_id,
-            extract_result.metadata.get("title") or file.filename,
-            f"PDF — {extract_result.total_pages} páginas, {extract_result.total_chars} caracteres",
+            extract_result.metadata.get("title") if extract_result.metadata else file.filename,
+            f"{ext} — {extract_result.total_pages} páginas, {extract_result.total_chars} caracteres",
             file.filename,
-            tmp_path,
-            file.content_type or "application/pdf",
+            stored_path,
+            file_type,
             len(contents),
-            json.dumps({"pdf_metadata": extract_result.metadata} if extract_result.metadata else {}),
+            json.dumps({"file_metadata": extract_result.metadata} if extract_result.metadata else {}),
             bot_id,
         )
 
-    # Create ingestion job
-    job_id = uuid.uuid4()
-    await conn.execute(
-        "INSERT INTO ingestion_jobs (id, source_id) VALUES ($1, $2)",
-        job_id, source_id,
-    )
+        # Create ingestion job (inside the connection scope)
+        job_id = uuid.uuid4()
+        await conn.execute(
+            "INSERT INTO ingestion_jobs (id, source_id) VALUES ($1, $2)",
+            job_id, source_id,
+        )
 
     # Run ingestion pipeline (don't await — it runs in background via FastAPI BackgroundTasks)
     import asyncio as _asyncio
@@ -226,6 +230,7 @@ async def list_sources(status: Optional[str] = None, bot_id: Optional[str] = Non
             "original_filename": r["original_filename"],
             "file_type": r["file_type"],
             "file_size_bytes": r["file_size_bytes"],
+            "file_available": bool(r["file_path"] and os.path.exists(r["file_path"])),
             "created_at": r["created_at"].isoformat(),
             "updated_at": r["updated_at"].isoformat(),
         }
@@ -299,6 +304,7 @@ async def get_source(source_id: str):
                 "original_filename": source["original_filename"],
                 "file_type": source["file_type"],
                 "file_size_bytes": source["file_size_bytes"],
+                "file_available": bool(source["file_path"] and os.path.exists(source["file_path"])),
                 "metadata": source["metadata"],
                 "created_at": source["created_at"].isoformat(),
                 "updated_at": source["updated_at"].isoformat(),
@@ -314,6 +320,63 @@ async def get_source(source_id: str):
                 "completed_at": jobs[0]["completed_at"].isoformat() if jobs[0]["completed_at"] else None,
             } if jobs else None,
         }
+
+
+@app.get("/sources/{source_id}/download")
+async def download_source(source_id: str):
+    """Serve the original uploaded file, if it still exists on disk."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT original_filename, file_path, file_type FROM knowledge_sources WHERE id = $1",
+            source_id,
+        )
+    if not row:
+        raise HTTPException(404, "Fuente no encontrada")
+
+    path = row["file_path"]
+    if not path or not os.path.exists(path):
+        raise HTTPException(404, "El archivo original no está disponible en este servidor")
+
+    filename = row["original_filename"] or os.path.basename(path)
+    return FileResponse(
+        path,
+        media_type=row["file_type"] or "application/octet-stream",
+        filename=filename,
+    )
+
+
+@app.delete("/sources/{source_id}")
+async def delete_source(source_id: str):
+    """Delete a knowledge source and all its related data (cascades to docs, chunks, embeddings, jobs)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # Fetch file_path before deleting so we can clean up the disk
+        row = await conn.fetchrow(
+            "SELECT file_path, original_filename FROM knowledge_sources WHERE id = $1",
+            source_id,
+        )
+        if not row:
+            raise HTTPException(404, "Fuente no encontrada")
+
+        # Delete the source — CASCADE handles documents → chunks → embeddings, and ingestion_jobs
+        await conn.execute("DELETE FROM knowledge_sources WHERE id = $1", source_id)
+
+        # Remove the uploaded file from disk if it exists
+        path = row["file_path"]
+        if path and os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass  # best-effort cleanup
+
+    return {
+        "ok": True,
+        "deleted": {
+            "id": source_id,
+            "original_filename": row["original_filename"],
+        },
+    }
 
 
 @app.post("/search")

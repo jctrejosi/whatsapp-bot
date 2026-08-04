@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { chat, getBots, createBot, deleteBot, updateBot, healthCheck, getSettings, updateSettings, resetSettings, sendTestEmail, getBotSettings, updateBotSettings, resetBotSettings, sendBotTestEmail, botChat, getBotKnowledge, uploadBotFile, deleteBotSource } from './api.js';
+import { chat, getBots, createBot, deleteBot, updateBot, healthCheck, getSettings, updateSettings, resetSettings, sendTestEmail, getBotSettings, updateBotSettings, resetBotSettings, sendBotTestEmail, botChat, getBotKnowledge, uploadBotFile, deleteBotSource, getModels, getBotModels, getBotSourceDownloadUrl } from './api.js';
 
 /* ─── Message Bubble ──────────────────── */
 function MessageBubble({ msg }) {
@@ -365,6 +365,9 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
   // Knowledge tab
   const [sources, setSources] = useState([]);
   const [uploading, setUploading] = useState(false);
+  // DeepSeek models
+  const [models, setModels] = useState([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -382,6 +385,12 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
     } else {
       setSources([]);
     }
+    // Cargar modelos disponibles desde la API de DeepSeek
+    setModelsLoading(true);
+    (botId ? getBotModels(botId) : getModels())
+      .then((d) => setModels(d.models || []))
+      .catch(() => setModels([]))
+      .finally(() => setModelsLoading(false));
   }, [open, botId, botName]);
 
   if (!open || !settings) return null;
@@ -518,7 +527,10 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
           )}
           <div className="settings-tabs">
             <button className={`tab-btn${tab === 'general' ? ' active' : ''}`} onClick={() => setTab('general')}>⚙️ General</button>
-            <button className={`tab-btn${tab === 'knowledge' ? ' active' : ''}`} onClick={() => setTab('knowledge')}>📚 Conocimiento</button>
+            <button className={`tab-btn${tab === 'context' ? ' active' : ''}`} onClick={() => setTab('context')}>📝 Contexto</button>
+            {botId && (
+              <button className={`tab-btn${tab === 'knowledge' ? ' active' : ''}`} onClick={() => setTab('knowledge')}>📚 Conocimiento</button>
+            )}
             <button className={`tab-btn${tab === 'whatsapp' ? ' active' : ''}`} onClick={() => setTab('whatsapp')}>📱 WhatsApp</button>
           </div>
 
@@ -591,12 +603,20 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
                 className="model-select"
                 value={settings.model}
                 onChange={(e) => set('model', e.target.value)}
+                disabled={modelsLoading && models.length === 0}
               >
-                <option value="deepseek-v4-flash">⚡ DeepSeek V4 Flash (rápido)</option>
-                <option value="deepseek-v3">📦 DeepSeek V3</option>
-                <option value="deepseek-v3-lite">💨 DeepSeek V3 Lite</option>
-                <option value="deepseek-r1">🧠 DeepSeek R1 (razonamiento)</option>
-                <option value="deepseek-chat">💬 DeepSeek Chat (V4 Pro)</option>
+                {modelsLoading && models.length === 0 && (
+                  <option value={settings.model}>⏳ Consultando modelos...</option>
+                )}
+                {!modelsLoading && models.length === 0 && (
+                  <option value={settings.model}>{settings.model || 'Sin modelos disponibles'}</option>
+                )}
+                {settings.model && !models.some((m) => m.id === settings.model) && models.length > 0 && (
+                  <option value={settings.model}>{settings.model} (actual)</option>
+                )}
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>{m.id}</option>
+                ))}
               </select>
             </div>
             <SliderRow
@@ -653,6 +673,24 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
             </>
           )}
 
+          {tab === 'context' && (
+            <div className="settings-section">
+              <h3>📝 Contexto del bot</h3>
+              <p className="settings-hint">
+                Define la personalidad y comportamiento del bot. Usa <code>{'{context}'}</code> como
+                marcador donde se insertará automáticamente la información del PDF subido.
+              </p>
+              <textarea
+                className="bot-name-input"
+                rows={16}
+                style={{ width: '100%', resize: 'vertical', fontFamily: 'monospace', fontSize: 12, lineHeight: 1.5 }}
+                placeholder="Eres un asistente que..."
+                value={settings.systemPrompt || ''}
+                onChange={(e) => set('systemPrompt', e.target.value)}
+              />
+            </div>
+          )}
+
           {tab === 'knowledge' && (
             <>
               <div className="settings-section">
@@ -673,7 +711,17 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
                         {s.status} · {s.file_type} {s.file_size_bytes ? `· ${(s.file_size_bytes / 1024).toFixed(1)} KB` : ''}
                       </div>
                     </div>
-                    <button className="btn btn-secondary btn-sm" onClick={() => handleDeleteSource(s.id)}>🗑️</button>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {s.file_available && (
+                        <a
+                          className="btn btn-secondary btn-sm"
+                          href={botId ? getBotSourceDownloadUrl(botId, s.id) : '#'}
+                          download
+                          title="Descargar archivo"
+                        >⬇️</a>
+                      )}
+                      <button className="btn btn-secondary btn-sm" onClick={() => handleDeleteSource(s.id)}>🗑️</button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -684,8 +732,8 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
                   </p>
                 ) : (
                   <label className="btn btn-primary btn-block" style={{ cursor: 'pointer', textAlign: 'center', display: 'block' }}>
-                    {uploading ? '⏳ Subiendo...' : '📤 Subir PDF'}
-                    <input type="file" accept=".pdf" style={{ display: 'none' }} onChange={handleUpload} disabled={uploading} />
+                    {uploading ? '⏳ Subiendo...' : '📤 Subir archivo'}
+                    <input type="file" accept=".pdf,.docx,.pptx,.xlsx,.xls,.csv,.txt,.md,.html,.json,.xml,.yaml,.yml,.py,.js,.ts,.java,.cpp,.odt,.ods,.odp,.rtf" style={{ display: 'none' }} onChange={handleUpload} disabled={uploading} />
                   </label>
                 )}
               </div>
@@ -858,6 +906,19 @@ export default function App() {
             }}
           >
             + Nuevo Bot
+          </button>
+        </div>
+
+        <div className="sidebar-section">
+          <button
+            className="btn btn-secondary btn-block"
+            onClick={() => {
+              setSelectedBotId(null);
+              setCreatingBot(false);
+              setSettingsOpen(true);
+            }}
+          >
+            ⚙️ Configuración General
           </button>
         </div>
       </aside>

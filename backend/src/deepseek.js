@@ -9,6 +9,32 @@ const { TOOLS, FUNCTION_MAP } = require('./functions');
 
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 const KNOWLEDGE_SERVICE_URL = process.env.KNOWLEDGE_SERVICE_URL || 'http://localhost:8000';
+const DEEPSEEK_API_URL = 'https://api.deepseek.com';
+
+const { ALLOWED_MODELS } = require('./settings');
+
+// System prompt default (fallback si el bot no tiene uno propio).
+// Usa {context} como marcador donde se insertan los chunks de conocimiento.
+const DEFAULT_SYSTEM_PROMPT = `Eres Ana, asesora de Angela's Vacations LLC, una agencia boutique con 20 años de experiencia. Estás ayudando a familias interesadas en el crucero de Quinceañeras a bordo del MSC World America (20-27 marzo 2027).
+
+ESTILO DE RESPUESTA:
+- Responde en el mismo idioma en que te hable el usuario.
+- Usa un tono cálido y entusiasta. Usa emojis ocasionalmente.
+- NUNCA menciones "fuentes", "contexto" ni términos técnicos.
+- Si ya hay historial, NO saludes de nuevo.
+
+CUÁNDO USAR FUNCIONES:
+- Para calcular precios y armar planes de grupo → usa calcular_plan
+- Para fechas de pago y cancelaciones → usa obtener_fechas_pago
+- Para la lista de qué incluye el paquete → usa obtener_que_incluye
+- Para el itinerario día por día → usa obtener_itinerario
+- Cuando el cliente muestra intención de comprar, dice "estoy de acuerdo", "me gusta el precio", "perfecto", "¿cómo reservo?", "¿cómo sigo?" o frases similares → PRIMERO pide sus datos (nombre, teléfono o correo) y cuántas personas viajarán. Cuando los tengas, usa iniciar_cierre_venta.
+- Para TODO lo demás: compara, explica, recomienda y resume usando los DATOS DEL EVENTO que tienes a continuación.
+
+DATOS DEL EVENTO:
+{context}`;
+
+const DEFAULT_SYSTEM_PROMPT_FALLBACK = `Eres Ana, asesora de Angela's Vacations LLC. Responde en el mismo idioma en que te hable el usuario, con un tono cálido y entusiasta.`;
 
 // Conversation history per user (in memory — max 6 messages)
 const conversationHistory = new Map();
@@ -19,10 +45,31 @@ const DEEPSEEK_HEADERS = {
 };
 
 /**
+ * Consulta los modelos disponibles para la API key configurada.
+ * Devuelve [{ id }] — fallback a la lista estática si no hay key o la API falla.
+ */
+async function listModels() {
+  const fallback = () => ALLOWED_MODELS.map((id) => ({ id }));
+  if (!DEEPSEEK_API_KEY) return fallback();
+  try {
+    const { data } = await axios.get(`${DEEPSEEK_API_URL}/models`, {
+      headers: { Authorization: `Bearer ${DEEPSEEK_API_KEY}` },
+      timeout: 10000,
+    });
+    const ids = (data.data || []).map((m) => m.id).filter(Boolean);
+    if (ids.length === 0) return fallback();
+    return ids.map((id) => ({ id }));
+  } catch (err) {
+    console.warn('No se pudieron consultar modelos DeepSeek:', err.response?.status || err.message);
+    return fallback();
+  }
+}
+
+/**
  * Search the knowledge base for relevant context.
  */
 async function searchKnowledge(query, botId) {
-  const { topK, useReranker, minConfidence } = getSettings(botId);
+  const { topK, useReranker, minConfidence } = await getSettings(botId);
   try {
     const { data } = await axios.post(
       `${KNOWLEDGE_SERVICE_URL}/search`,
@@ -41,7 +88,7 @@ async function searchKnowledge(query, botId) {
  * If the model returns tool_calls, execute them and call again with results.
  */
 async function callDeepSeek(messages, tools = null, attempt = 1, botId) {
-  const { temperature, maxTokens, model } = getSettings(botId);
+  const { temperature, maxTokens, model } = await getSettings(botId);
   // Escala: primer intento = maxTokens; 2º = x1.7; 3º = x2.5
   const tokens = Math.round(maxTokens * (attempt === 1 ? 1 : attempt === 2 ? 1.7 : 2.5));
 
@@ -60,7 +107,7 @@ async function callDeepSeek(messages, tools = null, attempt = 1, botId) {
   // If response was truncated, retry with more tokens
   if (finishReason === 'length' && attempt < 3 && msg.content && !msg.tool_calls) {
     console.log(`⚠️  Respuesta truncada (${msg.content.length} chars), reintentando con más tokens...`);
-    return callDeepSeek(messages, tools, attempt + 1);
+    return callDeepSeek(messages, tools, attempt + 1, botId);
   }
 
   // Handle function calling
@@ -92,7 +139,7 @@ async function callDeepSeek(messages, tools = null, attempt = 1, botId) {
       ...toolResults,
     ];
 
-    const { model, maxTokens } = getSettings(botId);
+    const { model, maxTokens } = await getSettings(botId);
     const retry = await axios.post(
       'https://api.deepseek.com/chat/completions',
       { model, messages: followUp, temperature: 0.7, max_tokens: Math.max(2500, maxTokens) },
@@ -145,7 +192,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
   }
 
   // ── Negative-response tracking (offers an advisor after N unclear answers) ──
-  const { maxNegativeResponses } = getSettings(botId);
+  const { maxNegativeResponses } = await getSettings(botId);
   if (wasAnswerClear(relevantChunks)) {
     resetNegative(userId);
   } else if (maxNegativeResponses > 0) {
@@ -182,40 +229,26 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
 
   // 2. Build messages with RAG context
   const messages = [];
-  let systemPrompt;
+  const settings = await getSettings(botId);
+  let systemPrompt = settings.systemPrompt?.trim();
 
-  if (relevantChunks.length > 0) {
+  if (!systemPrompt) {
+    // Fallback: usar el prompt duro por defecto
+    if (relevantChunks.length > 0) {
+      const context = relevantChunks.map((c, i) => `[Fuente ${i + 1}]:\n${c.content}`).join('\n\n---\n\n');
+      systemPrompt = DEFAULT_SYSTEM_PROMPT.replace('{context}', context);
+    } else {
+      systemPrompt = DEFAULT_SYSTEM_PROMPT_FALLBACK;
+    }
+  } else if (relevantChunks.length > 0 && systemPrompt.includes('{context}')) {
     const context = relevantChunks.map((c, i) => `[Fuente ${i + 1}]:\n${c.content}`).join('\n\n---\n\n');
-
-    systemPrompt =
-      'Eres Ana, asesora de Angela\'s Vacations LLC, una agencia boutique con 20 años de experiencia. ' +
-      'Estás ayudando a familias interesadas en el crucero de Quinceañeras a bordo del MSC World America ' +
-      '(20-27 marzo 2027).\n\n' +
-      'ESTILO DE RESPUESTA:\n' +
-      '- Responde en espa\u00f1ol, con calidez y entusiasmo. Usa emojis ocasionalmente.\n' +
-      '- NUNCA menciones "fuentes", "contexto" ni t\u00e9rminos t\u00e9cnicos.\n' +
-      '- Si ya hay historial, NO saludes de nuevo.\n\n' +
-      'CU\u00c1NDO USAR FUNCIONES:\n' +
-      '- Para calcular precios y armar planes de grupo \u2192 usa calcular_plan\n' +
-      '- Para fechas de pago y cancelaciones \u2192 usa obtener_fechas_pago\n' +
-      '- Para la lista de qu\u00e9 incluye el paquete \u2192 usa obtener_que_incluye\n' +
-      '- Para el itinerario d\u00eda por d\u00eda \u2192 usa obtener_itinerario\n' +
-      '- Cuando el cliente muestra intención de comprar, dice "estoy de acuerdo", "me gusta el precio", "perfecto", "¿cómo reservo?", "¿cómo sigo?" o frases similares \u2192 PRIMERO pide sus datos (nombre, teléfono o correo) y cuántas personas viajarán. Cuando los tengas, usa iniciar_cierre_venta.\n' +
-      '- Para TODO lo dem\u00e1s: compara, explica, recomienda, resume usando los DATOS DEL EVENTO.\n\n' +
-      'DATOS DEL EVENTO:\n' + context;
-  } else {
-    systemPrompt =
-      'Eres Ana, asesora de Angela\'s Vacations LLC. Responde en español, con calidez y entusiasmo.\n' +
-      'Aunque no tengas acceso a la base de conocimiento en este momento, tu prioridad es ayudar al cliente:\n' +
-      '- Si el cliente muestra intención clara de comprar o reservar \u2192 PRIMERO pide sus datos de contacto (nombre, teléfono o correo) y pregunta cuántas personas viajarán. Cuando te los dé, usa iniciar_cierre_venta.\n' +
-      '- Si pregunta por precios, dale rangos generales y ofrece el contacto con un asesor.\n' +
-      '- En TODOS los casos, responde de forma positiva y orientada a cerrar la venta.';
+    systemPrompt = systemPrompt.replace('{context}', context);
   }
 
   messages.push({ role: 'system', content: systemPrompt });
 
   // Historial previo como turnos reales de mensajes (contexto para el modelo)
-  const { maxHistoryMessages } = getSettings(botId);
+  const { maxHistoryMessages } = await getSettings(botId);
   for (const m of history.slice(-maxHistoryMessages)) {
     messages.push({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text });
   }
@@ -282,4 +315,4 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
   return { answer: content, chunks: relevantChunks, escalated };
 }
 
-module.exports = { chatWithDeepSeek, searchKnowledge };
+module.exports = { chatWithDeepSeek, searchKnowledge, listModels };
