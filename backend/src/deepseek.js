@@ -113,6 +113,9 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
   if (!conversationHistory.has(userId)) conversationHistory.set(userId, []);
   const history = conversationHistory.get(userId);
 
+  // Snapshot de la conversación (incluye el mensaje actual) para el correo al asesor
+  const historySnapshot = [...history, { role: 'user', text: userMessage }];
+
   // ── Escalation: only when user explicitly asks ───────────────────
   const pendingCheck = checkPendingEscalation(userId, userMessage);
   if (pendingCheck.pending && pendingCheck.confirm) {
@@ -141,6 +144,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
       setPendingEscalation(userId, {
         userId, userName, query: userMessage,
         reason: `Varios intentos sin respuesta clara (${count})`,
+        history: historySnapshot,
       });
       return {
         answer: 'Parece que no estoy logrando ayudarte con eso... 😅 ¿Quieres que le notifique a un asesor para que te contacte personalmente? Responde "sí" y le avisamos.',
@@ -151,7 +155,11 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
 
   // ── Check if user wants an advisor ──────────────────────────────
   if (shouldEscalate(userId, userMessage, relevantChunks).escalate) {
-    setPendingEscalation(userId, { userId, userName, query: userMessage, reason: 'Cliente solicitó asesor' });
+    setPendingEscalation(userId, {
+      userId, userName, query: userMessage,
+      reason: 'Cliente solicitó asesor',
+      history: historySnapshot,
+    });
     return {
       answer: '¿Quieres que le notifique a uno de nuestros asesores para que te contacte personalmente? Responde "sí" para enviar la notificación o "no" para continuar. 😊',
       chunks: relevantChunks, escalated: false,
