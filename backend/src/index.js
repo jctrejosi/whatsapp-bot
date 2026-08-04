@@ -107,6 +107,11 @@ const KNOWLEDGE_URL = process.env.KNOWLEDGE_SERVICE_URL || 'http://localhost:800
 // ─── Proxy to knowledge-service ────────────────────────────────────────
 const knowledge = axios.create({ baseURL: KNOWLEDGE_URL });
 
+// Mensaje de error con la URL intentada, para diagnóstico rápido
+function knowledgeError(url) {
+  return `Knowledge service unreachable (${KNOWLEDGE_URL}${url})`;
+}
+
 app.get('/sources', async (req, res) => {
   try {
     console.log(`Proxy → ${KNOWLEDGE_URL}/sources`);
@@ -114,7 +119,7 @@ app.get('/sources', async (req, res) => {
     res.json(data);
   } catch (e) {
     console.error(`Proxy /sources FAILED: ${e.code || e.message}`);
-    res.status(502).json({ error: 'Knowledge service unreachable' });
+    res.status(502).json({ error: knowledgeError('/sources') });
   }
 });
 
@@ -122,14 +127,14 @@ app.get('/sources/:id', async (req, res) => {
   try {
     const { data } = await knowledge.get(`/sources/${req.params.id}`);
     res.json(data);
-  } catch (e) { res.status(502).json({ error: 'Knowledge service unreachable' }); }
+  } catch (e) { res.status(502).json({ error: knowledgeError(`/sources/${req.params.id}`) }); }
 });
 
 app.post('/ingest', async (req, res) => {
   try {
     const { data } = await knowledge.post('/ingest', req.body);
     res.json(data);
-  } catch (e) { res.status(502).json({ error: 'Knowledge service unreachable' }); }
+  } catch (e) { res.status(502).json({ error: knowledgeError('/ingest') }); }
 });
 
 app.get('/health', async (req, res) => {
@@ -139,7 +144,7 @@ app.get('/health', async (req, res) => {
     res.json(data);
   } catch (e) {
     console.error(`Proxy /health FAILED: ${e.code || e.message}`);
-    res.status(502).json({ error: 'Knowledge service unreachable' });
+    res.status(502).json({ error: knowledgeError('/health') });
   }
 });
 
@@ -150,7 +155,7 @@ app.get('/conversations/:userId', async (req, res) => {
     res.json(data);
   } catch (e) {
     console.error(`Proxy /conversations FAILED: ${e.code || e.message}`);
-    res.status(502).json({ error: 'Knowledge service unreachable' });
+    res.status(502).json({ error: knowledgeError(`/conversations/${req.params.userId}`) });
   }
 });
 
