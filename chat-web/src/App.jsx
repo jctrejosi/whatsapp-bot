@@ -687,10 +687,8 @@ export default function App() {
         setError('');
       }
     };
-    // Al cargar y al volver a la pestaña (sin polling continuo)
+    // Solo al montar el componente (sin polling ni eventos adicionales)
     check();
-    window.addEventListener('focus', check);
-    return () => window.removeEventListener('focus', check);
   }, []);
 
   return (
