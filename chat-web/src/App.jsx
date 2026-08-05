@@ -3,7 +3,20 @@ import ReactDOM from 'react-dom';
 import { chat, getBots, createBot, deleteBot, updateBot, healthCheck, getSettings, updateSettings, resetSettings, sendTestEmail, getBotSettings, updateBotSettings, resetBotSettings, sendBotTestEmail, botChat, getBotKnowledge, uploadBotFile, deleteBotSource, getModels, getBotModels, getBotSourceDownloadUrl, getFunctions } from './api.js';
 
 /* ─── Emojis disponibles para el ícono del bot ─── */
-const BOT_ICONS = ['🤖', '🚢', '🎀', '💃', '🛳️', '👗', '💍', '🎂', '🍕', '🛒', '💼', '🎓', '🏨', '✈️', '⚽', '🎮'];
+const BOT_ICONS = [
+  // Asistentes / robots
+  '🤖', '👩‍💻', '🧑‍💻', '💻', '📱',
+  // Viajes y cruceros
+  '🚢', '🛳️', '✈️', '🛫', '🌍', '🗺️', '🏝️', '🌴', '🧳', '🗽',
+  // Eventos y fiestas
+  '🎀', '💃', '👗', '💍', '🎂', '🎉', '🎊', '🎈', '🥂', '🎵', '🎶',
+  // Comida
+  '🍕', '🍔', '🍜', '☕', '🍹', '🥗', '🌮',
+  // Compras / negocio
+  '🛒', '🏬', '💼', '📊', '💰', '🏦', '🛍️', '📦',
+  // Educación / salud / otros
+  '🎓', '📚', '🏥', '💊', '⚽', '🎮', '🎬', '🎤', '🏨', '🚕', '🔧', '🌱', '🐾', '❤️', '⭐',
+];
 
 /* ─── Message Bubble ──────────────────── */
 function MessageBubble({ msg, botName }) {
@@ -1150,7 +1163,6 @@ function Header({ status, error, checking, onRetry, onMenuToggle, botName, botIc
 
   return (
     <div className="header">
-      <h1>{botIcon || '🚢'} {botName || 'Plataforma'} — Knowledge Chat</h1>
       <h1>🚢 {botName || 'Plataforma'}</h1>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
         {cls && <span className={`status-dot ${cls}${checking ? ' pulse' : ''}`} />}

@@ -568,6 +568,8 @@ body {
   padding: 10px 18px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(0, 0, 0, 0.15);
+  max-height: 132px;
+  overflow-y: auto;
 }
 
 .icon-option {
