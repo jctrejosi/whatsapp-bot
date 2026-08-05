@@ -460,7 +460,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     // ═══ Cross-reference: si hay chunks, verificar que los datos de la
     //      respuesta existan realmente en el conocimiento ═══
     if (relevantChunks.length > 0 && content && !escalated) {
-      const allChunksText = relevantChunks.map(c => c.content).join(' ');
+      const allChunksText = relevantChunks.map(c => c.content).join(' ').toLowerCase();
 
       // Extraer todo tipo de datos concretos de la respuesta
       const dataPoints = [];
@@ -490,7 +490,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
       // Verificar cuántos NO están en los chunks
       let missingCount = 0;
       for (const dp of dataPoints) {
-        if (!allChunksText.includes(dp)) missingCount++;
+        if (!allChunksText.includes(dp.toLowerCase())) missingCount++;
       }
 
       if (dataPoints.length > 0 && missingCount > 0) {
