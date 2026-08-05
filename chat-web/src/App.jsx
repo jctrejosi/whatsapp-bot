@@ -414,6 +414,9 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
   const [modelsLoading, setModelsLoading] = useState(false);
   // Calling functions catalog
   const [functionCatalog, setFunctionCatalog] = useState([]);
+  // Última versión GUARDADA de settings (para detectar cambios sin guardar)
+  const originalRef = useRef(null);
+  const [confirmClose, setConfirmClose] = useState(false);
 
   const wasOpen = useRef(false);
 
@@ -432,7 +435,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
     }
     const fetchSettings = botId ? getBotSettings(botId) : getSettings();
     fetchSettings
-      .then(setSettings)
+      .then((data) => { setSettings(data); originalRef.current = data; })
       .catch((e) => setMsg('❌ No se pudo cargar: ' + e.message));
     // Cargar fuentes de conocimiento si hay botId
     if (botId) {
@@ -455,6 +458,30 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
   if (!open || !settings) return null;
 
   const set = (key, value) => setSettings((s) => ({ ...s, [key]: value }));
+
+  /** ¿Hay cambios sin guardar respecto a la última versión cargada/guardada? */
+  const hasChanges = () =>
+    !!settings && !!originalRef.current &&
+    JSON.stringify(settings) !== JSON.stringify(originalRef.current);
+
+  /** Cierra el modal; si hay cambios sin guardar, pide confirmación. */
+  const requestClose = () => {
+    if (uploading || saving) return;
+    if (hasChanges()) setConfirmClose(true);
+    else onClose();
+  };
+
+  /** Desde la confirmación: guardar y cerrar. */
+  const confirmSaveAndClose = async () => {
+    setConfirmClose(false);
+    await save();
+  };
+
+  /** Desde la confirmación: descartar cambios y cerrar. */
+  const confirmDiscard = () => {
+    setConfirmClose(false);
+    onClose();
+  };
 
   const addEmail = () => {
     const email = newEmail.trim();
@@ -552,6 +579,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
         }
         const { bot } = await createBot(name, '');
         await updateBotSettings(bot.id, settings);
+        originalRef.current = settings; // lo recién creado queda como base
         onCreated(bot); // el padre lo agrega, lo selecciona y pasa a modo edición
         setMsg('✅ Bot creado. Ahora puedes subir su conocimiento y ajustar lo que quieras.');
       } else {
@@ -560,7 +588,9 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
           await updateBot(botId, { name });
           onBotUpdated?.();
         }
-        setSettings(botId ? await updateBotSettings(botId, settings) : await updateSettings(settings));
+        const saved = botId ? await updateBotSettings(botId, settings) : await updateSettings(settings);
+        setSettings(saved);
+        originalRef.current = saved;
         onClose();
       }
     } catch (e) {
@@ -603,7 +633,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
   };
 
   return (
-    <div className="modal-overlay" onClick={uploading || saving ? undefined : onClose}>
+    <div className="modal-overlay" onClick={uploading || saving ? undefined : requestClose}>
       <div className="modal modal-config" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           {creating || nameEdit ? (
@@ -637,7 +667,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
               )}
             </div>
           )}
-          <button className="btn btn-secondary btn-sm" onClick={onClose} disabled={uploading || saving}>✕</button>
+          <button className="btn btn-secondary btn-sm" onClick={requestClose} disabled={uploading || saving}>✕</button>
         </div>
         <div className="settings-tabs">
           <button className={`tab-btn${tab === 'model' ? ' active' : ''}`} onClick={() => setTab('model')}>🧠 Modelo</button>
@@ -1004,6 +1034,30 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
               <button className="btn btn-secondary" onClick={() => setDeletingSource(null)}>
                 Cancelar
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Confirmación de cambios sin guardar ── */}
+      {confirmClose && (
+        <div className="modal-overlay" onClick={() => setConfirmClose(false)}>
+          <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>💾 Cambios sin guardar</h2>
+              <button className="btn btn-secondary btn-sm" onClick={() => setConfirmClose(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ fontSize: 13, color: 'var(--gray-200)' }}>
+                Tienes cambios sin guardar en la configuración del bot. ¿Qué deseas hacer?
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-primary" onClick={confirmSaveAndClose} disabled={saving}>
+                💾 Guardar cambios
+              </button>
+              <button className="btn btn-secondary" onClick={confirmDiscard}>Descartar</button>
+              <button className="btn btn-secondary" onClick={() => setConfirmClose(false)}>Cancelar</button>
             </div>
           </div>
         </div>
