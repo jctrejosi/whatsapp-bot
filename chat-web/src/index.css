@@ -539,9 +539,43 @@ body {
   color: var(--gold-light);
 }
 
+.modal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.modal-title-group h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.title-edit-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--gray-200);
+  padding: 4px;
+  border-radius: 6px;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: color 0.15s, background 0.15s;
+}
+
+.title-edit-btn:hover {
+  color: var(--gold-light);
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .modal-body {
   padding: 16px 18px;
   overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -549,22 +583,29 @@ body {
 
 .settings-tabs {
   display: flex;
-  gap: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden; /* nunca scroll en y en la tira de tabs */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  margin: -16px -18px 0;
   padding: 0 18px;
+  flex-shrink: 0;
+  background: var(--navy-light);
 }
 
 .tab-btn {
-  padding: 10px 16px;
+  padding: 8px 12px;
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--gray-200);
-  font-size: 13px;
+  font-size: 12px;
   cursor: pointer;
   transition: color 0.15s, border-color 0.15s;
   margin-bottom: -1px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .tab-btn:hover { color: var(--white); }
@@ -587,10 +628,13 @@ body {
 
 .modal-footer {
   padding: 12px 18px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid rgba(0, 0, 0, 0.25);
+  box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.18);
   display: flex;
   align-items: center;
   gap: 12px;
+  z-index: 1;
+  position: relative;
 }
 
 .settings-section h3 {
@@ -882,4 +926,15 @@ body {
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
+}
+
+/* ─── Modal de configuración: alto fijo — el encabezado queda quieto ── */
+.modal-config {
+  width: 630px;
+  max-width: 94vw;
+  height: 78vh;
+}
+.modal-config .modal-body {
+  flex: 1;
+  min-height: 0; /* necesario para que el scroll funcione dentro del flex column */
 }

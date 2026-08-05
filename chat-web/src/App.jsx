@@ -388,7 +388,10 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState('');
-  const [tab, setTab] = useState('general');
+  const [tab, setTab] = useState('chat');
+  // Inline name editing
+  const [nameEdit, setNameEdit] = useState(false);
+  const [nameValue, setNameValue] = useState('');
   // Knowledge tab
   const [sources, setSources] = useState([]);
   const [uploading, setUploading] = useState(false);
@@ -404,7 +407,10 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
     setMsg('');
     setTestResult('');
     setBotNameInput(botId ? (botName || '') : '');
-    setTab('general');
+    setTab('chat');
+    // Siempre arrancar en modo título (no editable); solo se habilita con el botón ✏️
+    setNameEdit(false);
+    setNameValue(botName || '');
     const fetchSettings = botId ? getBotSettings(botId) : getSettings();
     fetchSettings
       .then(setSettings)
@@ -483,6 +489,22 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
     }
   };
 
+  const saveInlineName = async () => {
+    const newName = nameValue.trim();
+    if (!botId || !newName || newName === (botName || '')) {
+      setNameEdit(false);
+      return;
+    }
+    try {
+      await updateBot(botId, { name: newName });
+      onBotUpdated?.();
+      setNameEdit(false);
+      setMsg('✅ Nombre actualizado');
+    } catch (e) {
+      setMsg('❌ ' + e.message);
+    }
+  };
+
   const save = async () => {
     setSaving(true);
     setMsg('');
@@ -548,179 +570,131 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-config" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>{creating ? '🤖 Nuevo Bot — Configuración' : '⚙️ Configuración'}</h2>
+          {creating || nameEdit ? (
+            <input
+              className="bot-name-input"
+              type="text"
+              placeholder="Nombre del bot"
+              value={creating ? botNameInput : nameValue}
+              onChange={(e) => creating ? setBotNameInput(e.target.value) : setNameValue(e.target.value)}
+              onBlur={() => !creating && saveInlineName()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  if (creating) save();
+                  else saveInlineName();
+                }
+              }}
+              autoFocus
+              style={{ flex: 1, maxWidth: '65%', fontSize: 15, fontWeight: 600, color: 'var(--gold-light)', background: 'transparent', border: 'none', borderBottom: '1px solid var(--gold-light)', borderRadius: 0, padding: '4px 0' }}
+            />
+          ) : (
+            <div className="modal-title-group">
+              <h2>{botName || (creating ? 'Nuevo Bot' : 'Configuración')}</h2>
+              {botId && (
+                <button
+                  className="title-edit-btn"
+                  onClick={() => { setNameEdit(true); setNameValue(botName || ''); }}
+                  title="Editar nombre"
+                  aria-label="Editar nombre"
+                >✏️</button>
+              )}
+            </div>
+          )}
           <button className="btn btn-secondary btn-sm" onClick={onClose}>✕</button>
         </div>
+        <div className="settings-tabs">
+          <button className={`tab-btn${tab === 'model' ? ' active' : ''}`} onClick={() => setTab('model')}>🧠 Modelo</button>
+          <button className={`tab-btn${tab === 'knowledge' ? ' active' : ''}`} onClick={() => setTab('knowledge')}>📚 Conocimiento</button>
+          <button className={`tab-btn${tab === 'functions' ? ' active' : ''}`} onClick={() => setTab('functions')}>🛠️ Funciones</button>
+          <button className={`tab-btn${tab === 'notifications' ? ' active' : ''}`} onClick={() => setTab('notifications')}>📧 Notificaciones</button>
+          <button className={`tab-btn${tab === 'whatsapp' ? ' active' : ''}`} onClick={() => setTab('whatsapp')}>📱 WhatsApp</button>
+          <button className={`tab-btn${tab === 'chat' ? ' active' : ''}`} onClick={() => setTab('chat')}>📨 Chat</button>
+        </div>
         <div className="modal-body">
-          {(creating || botId) && (
-            <div className="settings-section">
-              <label className="settings-label">Nombre del bot</label>
-              <input
-                className="bot-name-input"
-                type="text"
-                placeholder={creating ? 'Ej: Bot de mi negocio' : botName}
-                value={botNameInput}
-                onChange={(e) => setBotNameInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && save()}
-                autoFocus={creating}
-              />
-            </div>
-          )}
-          <div className="settings-tabs">
-            <button className={`tab-btn${tab === 'general' ? ' active' : ''}`} onClick={() => setTab('general')}>⚙️ General</button>
-            <button className={`tab-btn${tab === 'context' ? ' active' : ''}`} onClick={() => setTab('context')}>📝 Contexto</button>
-            <button className={`tab-btn${tab === 'chat' ? ' active' : ''}`} onClick={() => setTab('chat')}>📨 Chat</button>
-            <button className={`tab-btn${tab === 'functions' ? ' active' : ''}`} onClick={() => setTab('functions')}>🛠️ Funciones</button>
-            {botId && (
-              <button className={`tab-btn${tab === 'knowledge' ? ' active' : ''}`} onClick={() => setTab('knowledge')}>📚 Conocimiento</button>
-            )}
-            <button className={`tab-btn${tab === 'whatsapp' ? ' active' : ''}`} onClick={() => setTab('whatsapp')}>📱 WhatsApp</button>
-          </div>
 
-          {tab === 'general' && (
-            <>
-          <div className="settings-section">
-            <h3>📧 Notificación a asesores</h3>
-            <p className="settings-hint">
-              Correos que reciben el aviso cuando un cliente pide hablar con un asesor.
-            </p>
-            {settings.escalationEmails.map((email, i) => (
-              <div className="email-row" key={i}>
-                <span>{email}</span>
-                <button
-                  className="btn btn-secondary btn-sm"
-                  onClick={() =>
-                    set('escalationEmails', settings.escalationEmails.filter((_, j) => j !== i))
-                  }
+          {tab === 'model' && (
+            <div className="settings-section">
+              <h3>🧠 Configuración del modelo</h3>
+              <div className="settings-row">
+                <div className="row-top">
+                  <label>Modelo DeepSeek</label>
+                  <span className="value">{settings.model}</span>
+                </div>
+                <select
+                  className="model-select"
+                  value={settings.model}
+                  onChange={(e) => set('model', e.target.value)}
+                  disabled={modelsLoading && models.length === 0}
                 >
-                  Quitar
-                </button>
+                  {modelsLoading && models.length === 0 && (
+                    <option value={settings.model}>⏳ Consultando modelos...</option>
+                  )}
+                  {!modelsLoading && models.length === 0 && (
+                    <option value={settings.model}>{settings.model || 'Sin modelos disponibles'}</option>
+                  )}
+                  {settings.model && !models.some((m) => m.id === settings.model) && models.length > 0 && (
+                    <option value={settings.model}>{settings.model} (actual)</option>
+                  )}
+                  {models.map((m) => (
+                    <option key={m.id} value={m.id}>{m.id}</option>
+                  ))}
+                </select>
               </div>
-            ))}
-            <div className="email-add">
-              <input
-                type="email"
-                placeholder="asesor@correo.com"
-                value={newEmail}
-                onChange={(e) => setNewEmail(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && addEmail()}
+              <SliderRow
+                label="Creatividad (temperature)"
+                hint="Más alto = respuestas más variadas; más bajo = más consistentes."
+                value={settings.temperature}
+                min={0} max={1.5} step={0.05}
+                onChange={(v) => set('temperature', v)}
               />
-              <button className="btn btn-primary btn-sm" onClick={addEmail}>Agregar</button>
-            </div>
-            <div className="email-add">
-              <span className="email-add-label">Remitente</span>
-              <input
-                type="email"
-                placeholder="bot@tudominio.com"
-                value={settings.senderEmail}
-                onChange={(e) => set('senderEmail', e.target.value)}
+              <SliderRow
+                label="Fragmentos de conocimiento (top_k)"
+                hint="Cuántos fragmentos del conocimiento se usan por respuesta."
+                value={settings.topK}
+                min={1} max={10} step={1}
+                onChange={(v) => set('topK', v)}
               />
-            </div>
-            <div className="email-add">
-              <span className="email-add-label">API Key</span>
-              <input
-                type="password"
-                placeholder="re_..."
-                value={settings.resendApiKey}
-                onChange={(e) => set('resendApiKey', e.target.value)}
+              <SliderRow
+                label="Mensajes de contexto (historial)"
+                hint="Turnos previos que se envían al modelo para mantener el contexto."
+                value={settings.maxHistoryMessages}
+                min={1} max={30} step={1}
+                onChange={(v) => set('maxHistoryMessages', v)}
               />
-            </div>
-            <p className="settings-hint">
-              El remitente debe usar un dominio verificado en Resend. Puedes probar con
-              onboarding@resend.dev mientras verificas tu dominio.
-            </p>
-            <button className="btn btn-secondary btn-sm" onClick={test} disabled={testing}>
-              {testing ? 'Enviando...' : '📨 Enviar correo de prueba'}
-            </button>
-            {testResult && <div className="settings-status">{testResult}</div>}
-          </div>
+              <SliderRow
+                label="Confianza mínima de búsqueda"
+                hint="Similitud mínima (0-1) para considerar un fragmento relevante."
+                value={settings.minConfidence}
+                min={0} max={1} step={0.05}
+                onChange={(v) => set('minConfidence', v)}
+              />
+              <SliderRow
+                label="Máximo de tokens por respuesta"
+                hint="Tope de tokens de la primera respuesta del modelo."
+                value={settings.maxTokens}
+                min={256} max={8192} step={128}
+                onChange={(v) => set('maxTokens', v)}
+              />
+              <SliderRow
+                label="Intentos sin respuesta clara"
+                hint="Si el bot falla N veces seguidas, ofrece asesor. 0 = desactivado."
+                value={settings.maxNegativeResponses}
+                min={0} max={20} step={1}
+                onChange={(v) => set('maxNegativeResponses', v)}
+              />
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={settings.useReranker}
+                  onChange={(e) => set('useReranker', e.target.checked)}
+                />
+                <span>Usar reranker (DeepSeek V4 Pro) en la búsqueda</span>
+              </label>
 
-          <div className="settings-section">
-            <h3>🎛️ Sensibilidad y calidad de respuestas</h3>
-            <div className="settings-row">
-              <div className="row-top">
-                <label>Modelo DeepSeek</label>
-                <span className="value">{settings.model}</span>
-              </div>
-              <select
-                className="model-select"
-                value={settings.model}
-                onChange={(e) => set('model', e.target.value)}
-                disabled={modelsLoading && models.length === 0}
-              >
-                {modelsLoading && models.length === 0 && (
-                  <option value={settings.model}>⏳ Consultando modelos...</option>
-                )}
-                {!modelsLoading && models.length === 0 && (
-                  <option value={settings.model}>{settings.model || 'Sin modelos disponibles'}</option>
-                )}
-                {settings.model && !models.some((m) => m.id === settings.model) && models.length > 0 && (
-                  <option value={settings.model}>{settings.model} (actual)</option>
-                )}
-                {models.map((m) => (
-                  <option key={m.id} value={m.id}>{m.id}</option>
-                ))}
-              </select>
-            </div>
-            <SliderRow
-              label="Creatividad (temperature)"
-              hint="Más alto = respuestas más variadas y naturales; más bajo = más consistentes."
-              value={settings.temperature}
-              min={0} max={1.5} step={0.05}
-              onChange={(v) => set('temperature', v)}
-            />
-            <SliderRow
-              label="Fragmentos de conocimiento (top_k)"
-              hint="Cuántos fragmentos del PDF se usan para armar cada respuesta."
-              value={settings.topK}
-              min={1} max={10} step={1}
-              onChange={(v) => set('topK', v)}
-            />
-            <SliderRow
-              label="Mensajes de contexto (historial)"
-              hint="Cuántos turnos previos se envían al modelo en cada pregunta para mantener el contexto."
-              value={settings.maxHistoryMessages}
-              min={1} max={30} step={1}
-              onChange={(v) => set('maxHistoryMessages', v)}
-            />
-            <SliderRow
-              label="Confianza mínima de búsqueda"
-              hint="Similitud mínima (0-1) para que un fragmento se considere relevante. 0 = sin filtro."
-              value={settings.minConfidence}
-              min={0} max={1} step={0.05}
-              onChange={(v) => set('minConfidence', v)}
-            />
-            <SliderRow
-              label="Máximo de tokens por respuesta"
-              hint="Tope de la primera respuesta del modelo."
-              value={settings.maxTokens}
-              min={256} max={8192} step={128}
-              onChange={(v) => set('maxTokens', v)}
-            />
-            <SliderRow
-              label="Intentos sin respuesta clara"
-              hint="Si el bot no encuentra respuesta en N intentos seguidos, ofrece contactar a un asesor. 0 = desactivado."
-              value={settings.maxNegativeResponses}
-              min={0} max={20} step={1}
-              onChange={(v) => set('maxNegativeResponses', v)}
-            />
-            <label className="toggle-row">
-              <input
-                type="checkbox"
-                checked={settings.useReranker}
-                onChange={(e) => set('useReranker', e.target.checked)}
-              />
-              <span>Usar reranker (DeepSeek V4 Pro) en la búsqueda</span>
-            </label>
-          </div>
-            </>
-          )}
-
-          {tab === 'context' && (
-            <div className="settings-section">
-              <h3>📝 Prompt / Instrucciones</h3>
+              <h3 style={{ marginTop: 24 }}>📝 Prompt / Instrucciones</h3>
               <p className="settings-hint">
                 Define la personalidad y comportamiento del bot. Usa <code>{'{context}'}</code> como
                 marcador donde se insertará automáticamente la información del PDF subido.
@@ -733,6 +707,64 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
                 value={settings.systemPrompt || ''}
                 onChange={(e) => set('systemPrompt', e.target.value)}
               />
+            </div>
+          )}
+
+          {tab === 'notifications' && (
+            <div className="settings-section">
+              <h3>📧 Notificación a asesores</h3>
+              <p className="settings-hint">
+                Correos que reciben el aviso cuando un cliente pide hablar con un asesor.
+              </p>
+              {settings.escalationEmails.map((email, i) => (
+                <div className="email-row" key={i}>
+                  <span>{email}</span>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() =>
+                      set('escalationEmails', settings.escalationEmails.filter((_, j) => j !== i))
+                    }
+                  >
+                    Quitar
+                  </button>
+                </div>
+              ))}
+              <div className="email-add">
+                <input
+                  type="email"
+                  placeholder="asesor@correo.com"
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && addEmail()}
+                />
+                <button className="btn btn-primary btn-sm" onClick={addEmail}>Agregar</button>
+              </div>
+              <div className="email-add">
+                <span className="email-add-label">Remitente</span>
+                <input
+                  type="email"
+                  placeholder="bot@tudominio.com"
+                  value={settings.senderEmail}
+                  onChange={(e) => set('senderEmail', e.target.value)}
+                />
+              </div>
+              <div className="email-add">
+                <span className="email-add-label">API Key</span>
+                <input
+                  type="password"
+                  placeholder="re_..."
+                  value={settings.resendApiKey}
+                  onChange={(e) => set('resendApiKey', e.target.value)}
+                />
+              </div>
+              <p className="settings-hint">
+                El remitente debe usar un dominio verificado en Resend. Puedes probar con
+                onboarding@resend.dev mientras verificas tu dominio.
+              </p>
+              <button className="btn btn-secondary btn-sm" onClick={test} disabled={testing}>
+                {testing ? 'Enviando...' : '📨 Enviar correo de prueba'}
+              </button>
+              {testResult && <div className="settings-status">{testResult}</div>}
             </div>
           )}
 
