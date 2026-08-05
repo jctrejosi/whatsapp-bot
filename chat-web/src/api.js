@@ -147,3 +147,8 @@ export async function getBotModels(id) {
   const res = await fetch(`${API_URL}/bots/${id}/models`);
   return handleResponse(res, `Error ${res.status} al cargar modelos`);
 }
+
+export async function getFunctions() {
+  const res = await fetch(`${API_URL}/functions`);
+  return handleResponse(res, `Error ${res.status} al cargar funciones`);
+}

@@ -250,4 +250,39 @@ const FUNCTION_MAP = {
   iniciar_cierre_venta: iniciarCierreVenta,
 };
 
-module.exports = { TOOLS, FUNCTION_MAP };
+// ─── Catálogo de funciones (para configuración por bot) ───────────────────
+
+const FUNCTION_CATALOG = [
+  {
+    name: 'enviar_correo_informacion',
+    label: '📧 Enviar información por correo',
+    description: 'Envía al cliente la información que solicite (precios, itinerario, etc.) a su correo electrónico vía Resend.',
+  },
+  {
+    name: 'calcular_plan',
+    label: '💰 Calcular plan de precios',
+    description: 'Calcula el costo total y distribución de cabinas para un grupo según número de personas y tipo de cabina.',
+  },
+  {
+    name: 'obtener_fechas_pago',
+    label: '📅 Fechas de pago',
+    description: 'Devuelve los depósitos, pago final y política de cancelación del crucero.',
+  },
+  {
+    name: 'obtener_que_incluye',
+    label: '🎁 Qué incluye el paquete',
+    description: 'Lista todo lo que incluye el paquete de Quinceañera (limusina, camisetas, pastel, vals, etc.).',
+  },
+  {
+    name: 'obtener_itinerario',
+    label: '🗓️ Itinerario',
+    description: 'Itinerario completo día por día del crucero (20-27 marzo 2027).',
+  },
+  {
+    name: 'iniciar_cierre_venta',
+    label: '🤝 Cierre de venta',
+    description: 'Registra los datos del cliente listo para comprar y notifica al asesor por correo.',
+  },
+];
+
+module.exports = { TOOLS, FUNCTION_MAP, FUNCTION_CATALOG };

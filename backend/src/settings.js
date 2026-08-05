@@ -33,6 +33,7 @@ function envDefaults() {
     maxHistoryMessages: parseInt(process.env.MAX_HISTORY_MESSAGES || '6', 10),
     useReranker: true,
     systemPrompt: '',
+    enabledFunctions: [], // vacío = todas habilitadas; si tiene valores, solo esas
   };
 }
 
@@ -63,6 +64,7 @@ const VALIDATORS = {
   whatsappVerifyToken: (v) => typeof v === 'string',
   whatsappPhone: (v) => typeof v === 'string',
   systemPrompt: (v) => typeof v === 'string',
+  enabledFunctions: (v) => Array.isArray(v) && v.every((f) => typeof f === 'string' && f.trim().length > 0),
 };
 
 const settingsCache = new Map(); // key: botId || '__global__'
@@ -83,15 +85,21 @@ async function load(botId) {
   return envDefaults();
 }
 
-/** Persiste settings en DB (upsert). */
+/** Persiste settings en DB (upsert manual — compatible con índices únicos parciales). */
 async function persist(botId, data) {
-  await query(
-    `INSERT INTO bot_settings (bot_id, settings)
-     VALUES ($1, $2)
-     ON CONFLICT (bot_id) WHERE bot_id IS NOT DISTINCT FROM $1
-     DO UPDATE SET settings = $2, updated_at = NOW()`,
-    [botId || null, JSON.stringify(data)]
+  const payload = [botId || null, JSON.stringify(data)];
+  // Actualizar si la fila existe (bot_id IS NOT DISTINCT FROM cubre NULL y UUID)
+  const update = await query(
+    'UPDATE bot_settings SET settings = $2, updated_at = NOW() WHERE bot_id IS NOT DISTINCT FROM $1',
+    payload
   );
+  // Si no existía, insertarla
+  if (update.rowCount === 0) {
+    await query(
+      'INSERT INTO bot_settings (bot_id, settings) VALUES ($1, $2)',
+      payload
+    );
+  }
 }
 
 function cacheKey(botId) { return botId || '__global__'; }

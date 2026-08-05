@@ -4,6 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const { sendMessage, markAsRead } = require('./whatsapp');
 const { chatWithDeepSeek, listModels } = require('./deepseek');
+const { FUNCTION_CATALOG } = require('./functions');
 const { getSettings, updateSettings, resetSettings } = require('./settings');
 const { sendEscalationEmail } = require('./escalation');
 const { getLogs } = require('./logger');
@@ -205,6 +206,12 @@ app.delete('/bots/:id', async (req, res) => {
   } catch (err) {
     res.status(404).json({ error: err.message });
   }
+});
+
+// ─── Calling functions (catálogo configurable por bot) ──────────────────
+
+app.get('/functions', (req, res) => {
+  res.json({ functions: FUNCTION_CATALOG });
 });
 
 // ─── DeepSeek models (disponibles para la API key) ──────────────

@@ -8,6 +8,17 @@ const {
 const { getSettings } = require('./settings');
 const { TOOLS, FUNCTION_MAP } = require('./functions');
 
+/**
+ * Devuelve las tools habilitadas para un bot (según settings.enabledFunctions).
+ * Vacío/ausente = todas habilitadas.
+ */
+async function getToolsForBot(botId) {
+  const settings = await getSettings(botId);
+  const enabled = settings.enabledFunctions;
+  if (!enabled || enabled.length === 0) return TOOLS;
+  return TOOLS.filter((t) => enabled.includes(t.function.name));
+}
+
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 const KNOWLEDGE_SERVICE_URL = process.env.KNOWLEDGE_SERVICE_URL || 'http://localhost:8000';
 const DEEPSEEK_API_URL = 'https://api.deepseek.com';
@@ -279,7 +290,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
   let escalated = false;
   let emailSent = false;
   try {
-    const msg = await callDeepSeek(messages, TOOLS, 1, botId);
+    const msg = await callDeepSeek(messages, await getToolsForBot(botId), 1, botId);
     content = msg.content;
     emailSent = msg._emailSent === true;
     if (msg._escalate) {
@@ -355,4 +366,4 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
   return { answer: content, chunks: relevantChunks, escalated };
 }
 
-module.exports = { chatWithDeepSeek, searchKnowledge, listModels };
+module.exports = { chatWithDeepSeek, searchKnowledge, listModels, getToolsForBot };

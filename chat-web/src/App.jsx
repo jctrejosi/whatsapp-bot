@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { chat, getBots, createBot, deleteBot, updateBot, healthCheck, getSettings, updateSettings, resetSettings, sendTestEmail, getBotSettings, updateBotSettings, resetBotSettings, sendBotTestEmail, botChat, getBotKnowledge, uploadBotFile, deleteBotSource, getModels, getBotModels, getBotSourceDownloadUrl } from './api.js';
+import { chat, getBots, createBot, deleteBot, updateBot, healthCheck, getSettings, updateSettings, resetSettings, sendTestEmail, getBotSettings, updateBotSettings, resetBotSettings, sendBotTestEmail, botChat, getBotKnowledge, uploadBotFile, deleteBotSource, getModels, getBotModels, getBotSourceDownloadUrl, getFunctions } from './api.js';
 
 /* ─── Message Bubble ──────────────────── */
 function MessageBubble({ msg }) {
@@ -369,6 +369,8 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
   // DeepSeek models
   const [models, setModels] = useState([]);
   const [modelsLoading, setModelsLoading] = useState(false);
+  // Calling functions catalog
+  const [functionCatalog, setFunctionCatalog] = useState([]);
 
   useEffect(() => {
     if (!open) return;
@@ -392,6 +394,10 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
       .then((d) => setModels(d.models || []))
       .catch(() => setModels([]))
       .finally(() => setModelsLoading(false));
+    // Cargar catálogo de calling functions
+    getFunctions()
+      .then((d) => setFunctionCatalog(d.functions || []))
+      .catch(() => setFunctionCatalog([]));
   }, [open, botId, botName]);
 
   if (!open || !settings) return null;
@@ -538,6 +544,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
           <div className="settings-tabs">
             <button className={`tab-btn${tab === 'general' ? ' active' : ''}`} onClick={() => setTab('general')}>⚙️ General</button>
             <button className={`tab-btn${tab === 'context' ? ' active' : ''}`} onClick={() => setTab('context')}>📝 Contexto</button>
+            <button className={`tab-btn${tab === 'functions' ? ' active' : ''}`} onClick={() => setTab('functions')}>🛠️ Funciones</button>
             {botId && (
               <button className={`tab-btn${tab === 'knowledge' ? ' active' : ''}`} onClick={() => setTab('knowledge')}>📚 Conocimiento</button>
             )}
@@ -698,6 +705,44 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
                 value={settings.systemPrompt || ''}
                 onChange={(e) => set('systemPrompt', e.target.value)}
               />
+            </div>
+          )}
+
+          {tab === 'functions' && (
+            <div className="settings-section">
+              <h3>🛠️ Calling functions</h3>
+              <p className="settings-hint">
+                Selecciona las funciones que este bot puede ejecutar. Si desactivas una,
+                el modelo no podrá usarla en sus respuestas.
+              </p>
+              {functionCatalog.map((fn) => {
+                const enabled = settings.enabledFunctions || [];
+                const checked = enabled.length === 0 || enabled.includes(fn.name);
+                return (
+                  <label
+                    key={fn.name}
+                    className="toggle-row"
+                    style={{ alignItems: 'flex-start', gap: 10, marginBottom: 10 }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => {
+                        const current = settings.enabledFunctions || [];
+                        const all = functionCatalog.map((f) => f.name);
+                        const active = new Set(current.length === 0 ? all : current);
+                        if (active.has(fn.name)) active.delete(fn.name);
+                        else active.add(fn.name);
+                        set('enabledFunctions', all.filter((n) => active.has(n)));
+                      }}
+                    />
+                    <span style={{ flex: 1 }}>
+                      <span style={{ display: 'block', fontSize: 13 }}>{fn.label}</span>
+                      <span style={{ display: 'block', fontSize: 11, color: 'var(--gray-200)' }}>{fn.description}</span>
+                    </span>
+                  </label>
+                );
+              })}
             </div>
           )}
 
