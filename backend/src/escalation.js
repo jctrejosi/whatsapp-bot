@@ -110,7 +110,7 @@ async function sendEscalationEmail({ userId, userName, query, history, reason, t
     return { ok: true, results: [], skipped: true };
   }
 
-  const { escalationEmails, senderEmail, resendApiKey } = getSettings(botId);
+  const { escalationEmails, senderEmail, resendApiKey } = await getSettings(botId);
 
   const meta = EMAIL_TYPES[type] || EMAIL_TYPES.advisor;
 
@@ -189,6 +189,49 @@ async function sendEscalationEmail({ userId, userName, query, history, reason, t
   return { ok: results.some((r) => r.ok), results };
 }
 
+// ─── Email informativo al cliente (Resend) ───────────────────────────────
+
+/**
+ * Send an informational email directly to the client (not to advisors).
+ * @param {object} opts - { to, subject, body, botId }
+ * @returns {Promise<{ ok: boolean, error?: string }>}
+ */
+async function sendClientEmail({ to, subject, body, botId }) {
+  const { senderEmail, resendApiKey } = await getSettings(botId);
+
+  if (!resendApiKey) {
+    log('warn', 'RESEND_API_KEY no configurada — correo informativo no enviado');
+    return { ok: false, error: 'RESEND_API_KEY no configurada' };
+  }
+  if (!to || !to.includes('@')) {
+    return { ok: false, error: 'Dirección de correo inválida' };
+  }
+
+  const from = `${SENDER_NAME} <${senderEmail}>`;
+  const html = `
+    <div style="font-family:Arial,sans-serif;max-width:580px;padding:24px;">
+      <h2>📨 Información solicitada</h2>
+      <div style="white-space:pre-wrap;line-height:1.7;font-size:14px;color:#333;">${body || 'Aquí tienes la información que solicitaste.'}</div>
+      <hr style="margin-top:24px;">
+      <p style="color:#aaa;font-size:12px;">Enviado por Quinceañera Bot — Angela's Vacations LLC</p>
+    </div>
+  `;
+
+  try {
+    await axios.post(
+      'https://api.resend.com/emails',
+      { from, to, subject: subject || 'Información solicitada — Quinceañera Cruise Bot', html },
+      { headers: { Authorization: `Bearer ${resendApiKey}`, 'Content-Type': 'application/json' } }
+    );
+    log('info', `Correo informativo enviado a ${to}`);
+    return { ok: true };
+  } catch (err) {
+    const msg = err.response?.data?.message || err.message;
+    log('error', `Error enviando correo a ${to}:`, msg);
+    return { ok: false, error: msg };
+  }
+}
+
 // ─── Pending escalation confirmation ─────────────────────────────────────
 
 /**
@@ -236,4 +279,5 @@ module.exports = {
   checkPendingEscalation,
   setPendingEscalation,
   clearPendingEscalation,
+  sendClientEmail,
 };

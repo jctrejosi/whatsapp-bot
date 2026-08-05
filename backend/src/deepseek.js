@@ -3,6 +3,7 @@ const {
   shouldEscalate,
   sendEscalationEmail, checkPendingEscalation, setPendingEscalation, clearPendingEscalation,
   wasAnswerClear, trackNegative, resetNegative,
+  sendClientEmail,
 } = require('./escalation');
 const { getSettings } = require('./settings');
 const { TOOLS, FUNCTION_MAP } = require('./functions');
@@ -29,6 +30,7 @@ CUÁNDO USAR FUNCIONES:
 - Para la lista de qué incluye el paquete → usa obtener_que_incluye
 - Para el itinerario día por día → usa obtener_itinerario
 - Cuando el cliente muestra intención de comprar, dice "estoy de acuerdo", "me gusta el precio", "perfecto", "¿cómo reservo?", "¿cómo sigo?" o frases similares → PRIMERO pide sus datos (nombre, teléfono o correo) y cuántas personas viajarán. Cuando los tengas, usa iniciar_cierre_venta.
+- Si el cliente pide que le envíes la información por correo (precios, itinerario, qué incluye, etc.) → PRIMERO pide su correo electrónico si no lo tiene y, cuando lo tengas, usa enviar_correo_informacion con el email y la información solicitada.
 - Para TODO lo demás: compara, explica, recomienda y resume usando los DATOS DEL EVENTO que tienes a continuación.
 - Si no encuentras la información que el cliente necesita, ofrécele amablemente contactar a un asesor — siempre en el idioma del usuario.
 
@@ -113,48 +115,59 @@ async function callDeepSeek(messages, tools = null, attempt = 1, botId) {
     return callDeepSeek(messages, tools, attempt + 1, botId);
   }
 
-  // Handle function calling
+  // Handle function calling — multi-round: ejecuta tools y hace follow-up hasta
+  // que el modelo responda sin tool_calls (ej. recopila info → luego envía correo)
   if (msg.tool_calls && msg.tool_calls.length > 0) {
-    console.log(`Function call: ${msg.tool_calls.map(t => t.function.name).join(', ')}`);
-
-    // Execute functions and collect results
-    const toolResults = [];
+    let currentMsg = msg;
+    let currentMessages = messages;
     let escalate = null;
-    for (const toolCall of msg.tool_calls) {
-      const fn = FUNCTION_MAP[toolCall.function.name];
-      if (fn) {
-        const args = JSON.parse(toolCall.function.arguments || '{}');
-        const result = fn(args);
-        console.log(`  → ${toolCall.function.name}(${JSON.stringify(args)}) = OK`);
-        if (result._escalate && !escalate) escalate = result.lead || {};
-        toolResults.push({
-          role: 'tool',
-          tool_call_id: toolCall.id,
-          content: JSON.stringify(result),
-        });
+    let emailSent = false;
+
+    while (currentMsg.tool_calls && currentMsg.tool_calls.length > 0) {
+      console.log(`Function call: ${currentMsg.tool_calls.map(t => t.function.name).join(', ')}`);
+
+      // Execute functions and collect results
+      const toolResults = [];
+      for (const toolCall of currentMsg.tool_calls) {
+        const fn = FUNCTION_MAP[toolCall.function.name];
+        if (fn) {
+          const args = JSON.parse(toolCall.function.arguments || '{}');
+          const result = await fn(args, botId); // await soporta funciones async (ej. enviar_correo_informacion)
+          console.log(`  → ${toolCall.function.name}(${JSON.stringify(args)}) = ${JSON.stringify(result).substring(0, 120)}`);
+          if (toolCall.function.name === 'enviar_correo_informacion' && result.ok) emailSent = true;
+          if (result._escalate && !escalate) escalate = result.lead || {};
+          toolResults.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: JSON.stringify(result),
+          });
+        }
       }
+
+      // Send results back for the model to continue
+      const followUp = [
+        ...currentMessages,
+        { role: 'assistant', content: null, tool_calls: currentMsg.tool_calls },
+        ...toolResults,
+      ];
+
+      const { model, maxTokens } = await getSettings(botId);
+      const retry = await axios.post(
+        'https://api.deepseek.com/chat/completions',
+        { model, messages: followUp, temperature: 0.7, max_tokens: Math.max(2500, maxTokens) },
+        { headers: DEEPSEEK_HEADERS }
+      );
+
+      currentMsg = retry.data.choices[0].message;
+      currentMessages = followUp;
     }
 
-    // Send results back for final response
-    const followUp = [
-      ...messages,
-      { role: 'assistant', content: null, tool_calls: msg.tool_calls },
-      ...toolResults,
-    ];
-
-    const { model, maxTokens } = await getSettings(botId);
-    const retry = await axios.post(
-      'https://api.deepseek.com/chat/completions',
-      { model, messages: followUp, temperature: 0.7, max_tokens: Math.max(2500, maxTokens) },
-      { headers: DEEPSEEK_HEADERS }
-    );
-
-    const finalMsg = retry.data.choices[0].message;
     if (escalate) {
-      finalMsg._escalate = true;
-      finalMsg._escalateData = escalate;
+      currentMsg._escalate = true;
+      currentMsg._escalateData = escalate;
     }
-    return finalMsg;
+    if (emailSent) currentMsg._emailSent = true;
+    return currentMsg;
   }
 
   return msg;
@@ -264,9 +277,11 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
   // 3. Call DeepSeek with function calling
   let content;
   let escalated = false;
+  let emailSent = false;
   try {
     const msg = await callDeepSeek(messages, TOOLS, 1, botId);
     content = msg.content;
+    emailSent = msg._emailSent === true;
     if (msg._escalate) {
       escalated = true;
       const lead = msg._escalateData;
@@ -300,6 +315,25 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
       history: historySnapshot,
     });
     return { answer: '¡Gracias por tu interés! 😊 ¿Quieres que un asesor te contacte para ayudarte con la reserva? Responde "sí" y te conectamos.', chunks: [], escalated: false };
+  }
+
+  // Fallback determinista: si el usuario pidió un correo y el modelo NO llamó
+  // enviar_correo_informacion (o falló), enviarlo automáticamente con la respuesta
+  const wantsEmail = /correo|email|e-mail|e mail|mail/i.test(userMessage);
+  const emailMatch = userMessage.match(/[\w.+-]+@[\w-]+\.[\w.]+/);
+  if (!emailSent && wantsEmail && emailMatch) {
+    const emailResult = await sendClientEmail({
+      to: emailMatch[0],
+      subject: 'Información solicitada — Quinceañera Cruise Bot',
+      body: content.substring(0, 5000),
+      botId,
+    });
+    if (emailResult.ok) {
+      emailSent = true;
+      content += `\n\n📧 Listo — también te envié esta información por correo a ${emailMatch[0]}.`;
+    } else {
+      console.error('Envío de correo automático falló:', emailResult.error);
+    }
   }
 
   // Si el modelo respondió sin fragmentos de la base de conocimiento, activa

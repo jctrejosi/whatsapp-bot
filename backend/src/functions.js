@@ -2,6 +2,8 @@
  * Business logic functions callable by the AI model.
  */
 
+const { sendClientEmail } = require('./escalation');
+
 /**
  * Calculate a custom plan with pricing breakdown.
  */
@@ -137,9 +139,46 @@ function iniciarCierreVenta({ nombre, telefono, email, num_personas, tipo_cabina
   };
 }
 
+/**
+ * Send requested information by email to the client via Resend.
+ * Args: { email, informacion, asunto }
+ */
+async function enviarCorreo({ email, informacion, asunto }, botId) {
+  const to = (email || '').trim();
+  if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+    return { ok: false, mensaje: 'No tengo un correo válido. Pídele al cliente su dirección de correo electrónico.' };
+  }
+  const result = await sendClientEmail({
+    to,
+    subject: asunto || 'Información solicitada — Quinceañera Cruise Bot',
+    body: informacion || 'Aquí tienes la información que solicitaste.',
+    botId,
+  });
+  if (result.ok) {
+    return { ok: true, mensaje: `Información enviada correctamente a ${to}.` };
+  }
+  return { ok: false, error: result.error, mensaje: `No se pudo enviar el correo: ${result.error || 'error desconocido'}. Indícale al cliente que el envío falló.` };
+}
+
 // ─── Function definitions for DeepSeek tool calling ──────────────────────
 
 const TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'enviar_correo_informacion',
+      description: 'Envía por correo electrónico (Resend) la información que el cliente solicitó. Debe llamarse cuando el cliente pide que le envíen precios, itinerarios, qué incluye el paquete, o cualquier información por email. IMPORTANTE: antes de llamarla, el cliente debe darte su correo electrónico; si no lo tienes, pídelo primero.',
+      parameters: {
+        type: 'object',
+        properties: {
+          email:    { type: 'string', description: 'Correo electrónico del cliente al que se enviará la información.' },
+          informacion: { type: 'string', description: 'Contenido de la información solicitada (precios, itinerario, etc.). Usa los DATOS DEL EVENTO disponibles.' },
+          asunto:   { type: 'string', description: 'Asunto breve del correo. Ej: "Precios de cabinas — Quinceañera MSC World America".' },
+        },
+        required: ['email'],
+      },
+    },
+  },
   {
     type: 'function',
     function: {
@@ -203,6 +242,7 @@ const TOOLS = [
 ];
 
 const FUNCTION_MAP = {
+  enviar_correo_informacion: enviarCorreo,
   calcular_plan: calcularPlan,
   obtener_fechas_pago: obtenerFechasPago,
   obtener_que_incluye: obtenerQueIncluye,
