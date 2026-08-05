@@ -380,12 +380,13 @@ async def delete_source(source_id: str):
 
 
 @app.post("/search")
-async def search(req: SearchRequest) -> SearchResponse:
+async def search(req: SearchRequest, bot_id: str | None = None):
     """Semantic search over the knowledge base with optional DeepSeek reranking."""
     results = await search_chunks(
         query=req.query,
         top_k=req.top_k * (3 if req.use_reranker else 1),  # fetch more for reranker
         min_similarity=req.min_similarity,
+        bot_id=bot_id,
     )
 
     if req.use_reranker and len(results) > 1:

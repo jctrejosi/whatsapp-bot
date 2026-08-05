@@ -33,6 +33,7 @@ function envDefaults() {
     maxHistoryMessages: parseInt(process.env.MAX_HISTORY_MESSAGES || '6', 10),
     useReranker: true,
     systemPrompt: '',
+    welcomeMessage: '',
     enabledFunctions: [], // vacío = todas habilitadas; si tiene valores, solo esas
   };
 }
@@ -64,6 +65,7 @@ const VALIDATORS = {
   whatsappVerifyToken: (v) => typeof v === 'string',
   whatsappPhone: (v) => typeof v === 'string',
   systemPrompt: (v) => typeof v === 'string',
+  welcomeMessage: (v) => typeof v === 'string',
   enabledFunctions: (v) => Array.isArray(v) && v.every((f) => typeof f === 'string' && f.trim().length > 0),
 };
 

@@ -27,7 +27,7 @@ const { ALLOWED_MODELS } = require('./settings');
 
 // System prompt default (fallback si el bot no tiene uno propio).
 // Usa {context} como marcador donde se insertan los chunks de conocimiento.
-const DEFAULT_SYSTEM_PROMPT = `Eres Ana, asesora de Angela's Vacations LLC, una agencia boutique con 20 años de experiencia. Estás ayudando a familias interesadas en el crucero de Quinceañeras a bordo del MSC World America (20-27 marzo 2027).
+const DEFAULT_SYSTEM_PROMPT = `Eres un asistente virtual profesional y amable. Responde las preguntas del cliente basándote únicamente en los DATOS DEL EVENTO que tienes a continuación.
 
 ESTILO DE RESPUESTA:
 - Responde en el mismo idioma en que te hable el usuario.
@@ -36,19 +36,19 @@ ESTILO DE RESPUESTA:
 - Si ya hay historial, NO saludes de nuevo.
 
 CUÁNDO USAR FUNCIONES:
-- Para calcular precios y armar planes de grupo → usa calcular_plan
+- Para calcular precios y armar presupuestos → usa calcular_plan
 - Para fechas de pago y cancelaciones → usa obtener_fechas_pago
-- Para la lista de qué incluye el paquete → usa obtener_que_incluye
-- Para el itinerario día por día → usa obtener_itinerario
+- Para la lista de qué incluye → usa obtener_que_incluye
+- Para itinerario día por día → usa obtener_itinerario
 - Cuando el cliente muestra intención de comprar, dice "estoy de acuerdo", "me gusta el precio", "perfecto", "¿cómo reservo?", "¿cómo sigo?" o frases similares → PRIMERO pide sus datos (nombre, teléfono o correo) y cuántas personas viajarán. Cuando los tengas, usa iniciar_cierre_venta.
-- Si el cliente pide que le envíes la información por correo (precios, itinerario, qué incluye, etc.) → PRIMERO pide su correo electrónico si no lo tiene y, cuando lo tengas, usa enviar_correo_informacion con el email y la información solicitada.
+- Si el cliente pide que le envíes la información por correo → PRIMERO pide su correo electrónico si no lo tiene y, cuando lo tengas, usa enviar_correo_informacion con el email y la información solicitada.
 - Para TODO lo demás: compara, explica, recomienda y resume usando los DATOS DEL EVENTO que tienes a continuación.
 - Si no encuentras la información que el cliente necesita, ofrécele amablemente contactar a un asesor — siempre en el idioma del usuario.
 
 DATOS DEL EVENTO:
 {context}`;
 
-const DEFAULT_SYSTEM_PROMPT_FALLBACK = `Eres Ana, asesora de Angela's Vacations LLC. Responde en el mismo idioma en que te hable el usuario, con un tono cálido y entusiasta.
+const DEFAULT_SYSTEM_PROMPT_FALLBACK = `Eres un asistente virtual profesional y amable. Responde en el mismo idioma en que te hable el usuario, con un tono cálido y entusiasta.
 
 Si no encuentras la información que el cliente necesita, ofrécele amablemente contactar a un asesor — siempre en el idioma del usuario.`;
 
@@ -90,7 +90,7 @@ async function searchKnowledge(query, botId) {
     const { data } = await axios.post(
       `${KNOWLEDGE_SERVICE_URL}/search`,
       { query, top_k: topK, use_reranker: useReranker, min_similarity: minConfidence },
-      { headers: { 'Content-Type': 'application/json' } }
+      { headers: { 'Content-Type': 'application/json' }, params: { bot_id: botId } }
     );
     return data.results || [];
   } catch (err) {
@@ -329,21 +329,29 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
   }
 
   // Fallback determinista: si el usuario pidió un correo y el modelo NO llamó
-  // enviar_correo_informacion (o falló), enviarlo automáticamente con la respuesta
+  // enviar_correo_informacion (o falló), enviarlo automáticamente con la respuesta.
+  // Si no dio su email, el modelo debió pedirlo; si no lo pidió, se lo recordamos.
   const wantsEmail = /correo|email|e-mail|e mail|mail/i.test(userMessage);
   const emailMatch = userMessage.match(/[\w.+-]+@[\w-]+\.[\w.]+/);
-  if (!emailSent && wantsEmail && emailMatch) {
-    const emailResult = await sendClientEmail({
-      to: emailMatch[0],
-      subject: 'Información solicitada — Quinceañera Cruise Bot',
-      body: content.substring(0, 5000),
-      botId,
-    });
-    if (emailResult.ok) {
-      emailSent = true;
-      content += `\n\n📧 Listo — también te envié esta información por correo a ${emailMatch[0]}.`;
+  if (!emailSent && wantsEmail) {
+    if (emailMatch) {
+      const emailResult = await sendClientEmail({
+        to: emailMatch[0],
+        subject: 'Información solicitada',
+        body: content.substring(0, 5000),
+        botId,
+      });
+      if (emailResult.ok) {
+        emailSent = true;
+        content += `\n\n📧 Listo — también te envié esta información por correo a ${emailMatch[0]}. Revisa spam si no aparece.`;
+      } else {
+        console.error('Envío de correo automático falló:', emailResult.error);
+      }
     } else {
-      console.error('Envío de correo automático falló:', emailResult.error);
+      // El usuario quiere un correo pero no dio su email — si el modelo no lo pidió, recordárselo
+      if (content && !/[Cc]orreo|[Ee]mail/.test(content)) {
+        content += '\n\n📧 Si quieres que te envíe la información por correo, dime tu dirección de email. 😊';
+      }
     }
   }
 

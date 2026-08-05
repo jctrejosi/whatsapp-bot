@@ -2,7 +2,7 @@ const axios = require('axios');
 const { getSettings } = require('./settings');
 const { log } = require('./logger');
 
-const SENDER_NAME = 'Quinceañera Bot';
+const SENDER_NAME = 'Asistente Virtual';
 
 // Track consecutive negative responses per user (in memory — resets on restart)
 const negativeCounts = new Map();
@@ -90,9 +90,9 @@ function resetNegative(userId) {
 
 // Icono y textos según el tipo de notificación
 const EMAIL_TYPES = {
-  advisor: { icon: '🚢', title: 'Escalación — Quinceañera Cruise Bot' },
-  sales:   { icon: '💰', title: 'Cierre de venta — Quinceañera Cruise Bot' },
-  test:    { icon: '🧪', title: 'Correo de prueba — Quinceañera Cruise Bot' },
+  advisor: { icon: '🚢', title: 'Escalación — Plataforma de Bots' },
+  sales:   { icon: '💰', title: 'Cierre de venta — Plataforma de Bots' },
+  test:    { icon: '🧪', title: 'Correo de prueba — Plataforma de Bots' },
 };
 
 /**
@@ -140,7 +140,7 @@ async function sendEscalationEmail({ userId, userName, query, history, reason, t
     <h3>Historial de la conversación:</h3>
     <pre style="background:#f5f5f5;padding:10px;border-radius:6px;white-space:pre-wrap">${historyText || '(sin historial)'}</pre>
     <hr>
-    <p style="color:#888;font-size:12px">Quinceañera Cruise Bot — Escalación automática</p>
+    <p style="color:#888;font-size:12px">Plataforma de Bots — Notificación automática</p>
   `;
 
   // Asunto: menciona la solicitud del cliente (cierre de venta usa el motivo completo)
@@ -213,14 +213,14 @@ async function sendClientEmail({ to, subject, body, botId }) {
       <h2>📨 Información solicitada</h2>
       <div style="white-space:pre-wrap;line-height:1.7;font-size:14px;color:#333;">${body || 'Aquí tienes la información que solicitaste.'}</div>
       <hr style="margin-top:24px;">
-      <p style="color:#aaa;font-size:12px;">Enviado por Quinceañera Bot — Angela's Vacations LLC</p>
+      <p style="color:#aaa;font-size:12px;">Enviado por la Plataforma de Bots</p>
     </div>
   `;
 
   try {
     await axios.post(
       'https://api.resend.com/emails',
-      { from, to, subject: subject || 'Información solicitada — Quinceañera Cruise Bot', html },
+      { from, to, subject: subject || 'Información solicitada — Plataforma de Bots', html },
       { headers: { Authorization: `Bearer ${resendApiKey}`, 'Content-Type': 'application/json' } }
     );
     log('info', `Correo informativo enviado a ${to}`);
@@ -243,7 +243,7 @@ function checkPendingEscalation(userId, userMessage) {
   if (!pending) return { pending: false };
 
   const msg = userMessage.toLowerCase().trim();
-  const yes = ['sí', 'si', 'yes', 'dale', 'envíale', 'enviale', 'ok', 'vale', 'claro', 'por favor', 'porfa', 'gracias', 'bueno', 'de acuerdo'];
+  const yes = ['sí', 'si', 'yes', 'dale', 'envíale', 'enviale', 'ok', 'vale', 'claro', 'porfa', 'gracias', 'de acuerdo'];
   const no = ['no', 'nop', 'nope', 'cancelar', 'espera'];
 
   const confirmed = yes.some(w => msg === w || msg.startsWith(w + ' ') || msg.includes(' ' + w + ' ') || msg.includes(' ' + w));

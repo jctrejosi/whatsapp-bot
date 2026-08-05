@@ -2,12 +2,12 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { chat, getBots, createBot, deleteBot, updateBot, healthCheck, getSettings, updateSettings, resetSettings, sendTestEmail, getBotSettings, updateBotSettings, resetBotSettings, sendBotTestEmail, botChat, getBotKnowledge, uploadBotFile, deleteBotSource, getModels, getBotModels, getBotSourceDownloadUrl, getFunctions } from './api.js';
 
 /* ─── Message Bubble ──────────────────── */
-function MessageBubble({ msg }) {
+function MessageBubble({ msg, botName }) {
   const isUser = msg.role === 'user';
 
   return (
     <div className={`message ${isUser ? 'user' : 'bot'}`}>
-      {!isUser && <div className="label">🤖 Quinceañera Bot</div>}
+      {!isUser && <div className="label">🤖 {botName || 'Bot'}</div>}
       {isUser && <div className="label">Tú</div>}
       <div className="bubble">{msg.text}</div>
     </div>
@@ -15,10 +15,10 @@ function MessageBubble({ msg }) {
 }
 
 /* ─── Typing Indicator ────────────────── */
-function TypingIndicator() {
+function TypingIndicator({ botName }) {
   return (
     <div className="message bot">
-      <div className="label">🤖 Quinceañera Bot</div>
+      <div className="label">🤖 {botName || 'Bot'}</div>
       <div className="bubble">
         <div className="typing-indicator">
           <span></span><span></span><span></span>
@@ -29,11 +29,12 @@ function TypingIndicator() {
 }
 
 /* ─── Chat Panel ──────────────────────── */
-function ChatPanel({ online, botId }) {
+function ChatPanel({ online, botId, botName }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [queueCount, setQueueCount] = useState(0);
+  const [welcome, setWelcome] = useState('');
   const messagesEnd = useRef(null);
   const queue = useRef([]);
   const sending = useRef(false);
@@ -45,6 +46,22 @@ function ChatPanel({ online, botId }) {
   const chatFn = botId ? (q) => botChat(botId, q) : (q) => chat(q);
 
   useEffect(() => scrollToBottom(), [messages, loading]);
+
+  // Al cambiar de bot: resetear chat y cargar su mensaje de bienvenida
+  useEffect(() => {
+    setMessages([]);
+    setInput('');
+    setQueueCount(0);
+    queue.current = [];
+    setWelcome('');
+    if (botId) {
+      getBotSettings(botId)
+        .then((s) => setWelcome(s.welcomeMessage || ''))
+        .catch(() => setWelcome(''));
+    } else {
+      setWelcome('¡Hola! 👋 Soy el asistente virtual de la plataforma. ¿En qué puedo ayudarte?');
+    }
+  }, [botId]);
 
   const sendOne = useCallback(async (text) => {
     sending.current = true;
@@ -101,31 +118,29 @@ function ChatPanel({ online, botId }) {
       <div className="messages">
         {!online && (
           <div className="message bot">
-            <div className="label">🤖 Quinceañera Bot</div>
+            <div className="label">🤖 {botName || 'Bot'}</div>
             <div className="bubble">
               ⏳ Conectando con el servicio...
             </div>
           </div>
         )}
-        {online && messages.length === 0 && (
+        {online && messages.length === 0 && welcome && (
           <div className="message bot">
-            <div className="label">🤖 Quinceañera Bot</div>
-            <div className="bubble">
-              ¡Hola! Soy el asistente del crucero de Quinceañeras a bordo del MSC World America (20-27 marzo 2027). Pregúntame lo que quieras sobre el evento.
-            </div>
+            <div className="label">🤖 {botName || 'Bot'}</div>
+            <div className="bubble">{welcome}</div>
           </div>
         )}
         {messages.map((msg, i) => (
-          <MessageBubble key={i} msg={msg} />
+          <MessageBubble key={i} msg={msg} botName={botName} />
         ))}
-        {loading && <TypingIndicator />}
+        {loading && <TypingIndicator botName={botName} />}
         <div ref={messagesEnd} />
       </div>
 
       <div className="input-area">
         <input
           type="text"
-          placeholder={online ? 'Escribe tu pregunta sobre el crucero...' : 'Servicio no disponible — esperando conexión...'}
+          placeholder={online ? 'Escribe tu mensaje...' : 'Servicio no disponible — esperando conexión...'}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -533,7 +548,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
               <input
                 className="bot-name-input"
                 type="text"
-                placeholder={creating ? 'Ej: Quinceañera Bot' : botName}
+                placeholder={creating ? 'Ej: Bot de mi negocio' : botName}
                 value={botNameInput}
                 onChange={(e) => setBotNameInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && save()}
@@ -544,6 +559,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
           <div className="settings-tabs">
             <button className={`tab-btn${tab === 'general' ? ' active' : ''}`} onClick={() => setTab('general')}>⚙️ General</button>
             <button className={`tab-btn${tab === 'context' ? ' active' : ''}`} onClick={() => setTab('context')}>📝 Contexto</button>
+            <button className={`tab-btn${tab === 'chat' ? ' active' : ''}`} onClick={() => setTab('chat')}>📨 Chat</button>
             <button className={`tab-btn${tab === 'functions' ? ' active' : ''}`} onClick={() => setTab('functions')}>🛠️ Funciones</button>
             {botId && (
               <button className={`tab-btn${tab === 'knowledge' ? ' active' : ''}`} onClick={() => setTab('knowledge')}>📚 Conocimiento</button>
@@ -692,7 +708,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
 
           {tab === 'context' && (
             <div className="settings-section">
-              <h3>📝 Contexto del bot</h3>
+              <h3>📝 Prompt / Instrucciones</h3>
               <p className="settings-hint">
                 Define la personalidad y comportamiento del bot. Usa <code>{'{context}'}</code> como
                 marcador donde se insertará automáticamente la información del PDF subido.
@@ -704,6 +720,23 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
                 placeholder="Eres un asistente que..."
                 value={settings.systemPrompt || ''}
                 onChange={(e) => set('systemPrompt', e.target.value)}
+              />
+            </div>
+          )}
+
+          {tab === 'chat' && (
+            <div className="settings-section">
+              <h3>📨 Mensaje de bienvenida</h3>
+              <p className="settings-hint">
+                Mensaje que muestra el bot al iniciar una conversación nueva. Si se deja vacío, no se muestra ningún saludo.
+              </p>
+              <textarea
+                className="bot-name-input"
+                rows={4}
+                style={{ width: '100%', resize: 'vertical', fontFamily: 'monospace', fontSize: 12, lineHeight: 1.5 }}
+                placeholder="¡Hola! ¿En qué puedo ayudarte?"
+                value={settings.welcomeMessage || ''}
+                onChange={(e) => set('welcomeMessage', e.target.value)}
               />
             </div>
           )}
@@ -892,7 +925,7 @@ function Header({ status, error, onMenuToggle, botName }) {
 
   return (
     <div className="header">
-      <h1>🚢 {botName || 'Quinceañera Cruise'} — Knowledge Chat</h1>
+      <h1>🚢 {botName || 'Plataforma'} — Knowledge Chat</h1>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
         {cls && <span className={`status-dot ${cls}`} />}
         <span style={{ color: 'var(--gray-200)' }}>{label}</span>
@@ -1024,7 +1057,7 @@ export default function App() {
           onMenuToggle={() => setSidebarOpen((o) => !o)}
           botName={selectedBot?.name}
         />
-        <ChatPanel online={online === true} botId={selectedBotId} />
+        <ChatPanel online={online === true} botId={selectedBotId} botName={selectedBot?.name} />
       </main>
 
       <SettingsPanel
