@@ -1,6 +1,4 @@
-import asyncio
-import asyncpg
-import json
+import asyncio, asyncpg, json
 
 LOCAL = "postgresql://knowledge:knowledge@localhost:5432/knowledge_db"
 PROD = "postgresql://postgres:uMeugMxnImqRuEufeIgVeDtwBIqTHOYG@altaria.proxy.rlwy.net:23497/railway"
@@ -8,15 +6,14 @@ PROD = "postgresql://postgres:uMeugMxnImqRuEufeIgVeDtwBIqTHOYG@altaria.proxy.rlw
 async def main():
     for url, label in [(LOCAL, "LOCAL"), (PROD, "PROD")]:
         conn = await asyncpg.connect(url)
-        rows = await conn.fetch("SELECT bot_id, settings FROM bot_settings ORDER BY bot_id NULLS LAST")
-        print(f"\n=== {label} ===")
+        rows = await conn.fetch("SELECT bot_id, settings FROM bot_settings WHERE bot_id IS NOT NULL")
         for r in rows:
-            bot_id = str(r["bot_id"]) if r["bot_id"] else "GLOBAL"
             s = json.loads(r["settings"]) if isinstance(r["settings"], str) else r["settings"]
-            prompt = s.get("systemPrompt", "")
-            print(f"\n--- {bot_id} ---")
-            print(f"  systemPrompt ({len(prompt)} chars):")
-            print(f"  {prompt}")
+            if isinstance(s, str): s = json.loads(s)
+            print(f"\n{label} — bot {r['bot_id']}")
+            print(f"  senderEmail:      {s.get('senderEmail')}")
+            print(f"  resendApiKey:     {s.get('resendApiKey', '')[:15]}...")
+            print(f"  escalationEmails: {s.get('escalationEmails')}")
         await conn.close()
 
 asyncio.run(main())

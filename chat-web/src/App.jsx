@@ -29,7 +29,7 @@ function TypingIndicator({ botName }) {
 }
 
 /* ─── Chat Panel ──────────────────────── */
-function ChatPanel({ online, botId, botName, checking, onRetry, error }) {
+function ChatPanel({ online, botId, botName, checking, onRetry, error, hasBots }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -59,7 +59,7 @@ function ChatPanel({ online, botId, botName, checking, onRetry, error }) {
         .then((s) => setWelcome(s.welcomeMessage || ''))
         .catch(() => setWelcome(''));
     } else {
-      setWelcome('¡Hola! 👋 Soy el asistente virtual de la plataforma. ¿En qué puedo ayudarte?');
+      setWelcome('');
     }
   }, [botId]);
 
@@ -136,6 +136,14 @@ function ChatPanel({ online, botId, botName, checking, onRetry, error }) {
             </button>
           </div>
         )}
+        {online && !botId && !hasBots && (
+          <div className="connect-screen">
+            <div className="connect-title">🤖 No tienes bots aún</div>
+            <div className="connect-hint">
+              Crea un bot desde el panel lateral (<strong>+ Nuevo Bot</strong>) para empezar a chatear.
+            </div>
+          </div>
+        )}
         {online && messages.length === 0 && welcome && (
           <div className="message bot">
             <div className="label">🤖 {botName || 'Bot'}</div>
@@ -152,16 +160,20 @@ function ChatPanel({ online, botId, botName, checking, onRetry, error }) {
       <div className="input-area">
         <input
           type="text"
-          placeholder={online ? 'Escribe tu mensaje...' : 'Servicio no disponible — esperando conexión...'}
+          placeholder={
+            !online ? 'Servicio no disponible — esperando conexión...' :
+            !botId ? 'Selecciona o crea un bot para empezar...' :
+            'Escribe tu mensaje...'
+          }
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          disabled={!online}
+          disabled={!online || !botId}
         />
         <button
           className="btn btn-primary"
           onClick={handleSend}
-          disabled={!online || !input.trim()}
+          disabled={!online || !input.trim() || !botId}
         >
           {loading ? '⏳' : 'Enviar'}
         </button>
@@ -1011,6 +1023,21 @@ export default function App() {
 
   useEffect(() => { loadBots(); }, [loadBots]);
 
+  // Auto-select first bot on initial load
+  useEffect(() => {
+    if (bots.length > 0 && !selectedBotId && !creatingBot) {
+      setSelectedBotId(bots[0].id);
+    }
+  }, [bots]);
+
+  // When current selection is no longer in the list (e.g., after delete)
+  useEffect(() => {
+    if (bots.length === 0 || creatingBot) return;
+    if (!selectedBotId || !bots.some((b) => b.id === selectedBotId)) {
+      setSelectedBotId(bots[0].id);
+    }
+  }, [bots, selectedBotId, creatingBot]);
+
   // Health check + retry
   const retryConnection = useCallback(async () => {
     setChecking(true);
@@ -1133,6 +1160,7 @@ export default function App() {
           checking={checking}
           onRetry={retryConnection}
           error={error}
+          hasBots={bots.length > 0}
         />
       </main>
 
