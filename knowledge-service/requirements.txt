@@ -19,8 +19,8 @@ httpx==0.28.1
 # Config
 python-dotenv==1.2.2
 
-# Local embeddings (HashingVectorizer)
-scikit-learn==1.9.0
+# Multilingual embeddings (cross-lingual: Spanish ↔ English)
+sentence-transformers==5.2.0
 pymupdf
 pymupdf_layout
 pdfplumber

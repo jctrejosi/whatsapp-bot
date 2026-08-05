@@ -1,41 +1,42 @@
-"""Embedding service — HashingVectorizer (stateless, fixed dimensions)."""
+"""Embedding service — multilingual model for cross-lingual semantic matching.
 
-from sklearn.feature_extraction.text import HashingVectorizer
-from sklearn.preprocessing import normalize
+Uses intfloat/multilingual-e5-small (~118 MB).
+Supports 100+ languages including Spanish ↔ English natively.
+"""
 
-VECTOR_DIM = 512  # Fixed dimension — stateless, always consistent
+from sentence_transformers import SentenceTransformer
 
-_vectorizer: HashingVectorizer | None = None
+VECTOR_DIM = 384  # e5-small produces 384-dimensional embeddings
+
+_model: SentenceTransformer | None = None
 
 
-def _get_vectorizer() -> HashingVectorizer:
-    global _vectorizer
-    if _vectorizer is None:
-        _vectorizer = HashingVectorizer(
-            n_features=VECTOR_DIM,
-            ngram_range=(1, 2),
-            strip_accents="unicode",
-            lowercase=True,
-            alternate_sign=False,  # positive-only counts for cosine
-            norm=None,             # we normalize manually after
+def _get_model() -> SentenceTransformer:
+    global _model
+    if _model is None:
+        _model = SentenceTransformer(
+            "intfloat/multilingual-e5-small",
+            device="cpu",
         )
-    return _vectorizer
+    return _model
 
 
 async def embed_texts(texts: list[str]) -> list[list[float]]:
     """
-    Generate hashing-based embeddings for a batch of texts.
-    Stateless — same text always produces the same vector.
-    Dimension is always VECTOR_DIM (512).
+    Generate multilingual embeddings for a batch of texts.
+    Same text in different languages maps to similar vectors.
+    Dimension is always VECTOR_DIM (384).
     """
     if not texts:
         return []
 
-    vec = _get_vectorizer()
-    matrix = vec.transform(texts)
-    # L2-normalize so cosine similarity via pgvector <=> works correctly
-    matrix = normalize(matrix, norm="l2")
-    return [row.toarray()[0].tolist() for row in matrix]
+    model = _get_model()
+    embeddings = model.encode(
+        texts,
+        normalize_embeddings=True,  # L2-normalized for cosine similarity
+        show_progress_bar=False,
+    )
+    return [e.tolist() for e in embeddings]
 
 
 async def embed_text(text: str) -> list[float]:
@@ -45,5 +46,6 @@ async def embed_text(text: str) -> list[float]:
 
 
 async def close_client() -> None:
-    """No-op for local model."""
-    pass
+    """Release model from memory."""
+    global _model
+    _model = None
