@@ -407,7 +407,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
     setMsg('');
     setTestResult('');
     setBotNameInput(botId ? (botName || '') : '');
-    setTab('chat');
+    setTab('model');
     // Siempre arrancar en modo título (no editable); solo se habilita con el botón ✏️
     setNameEdit(false);
     setNameValue(botName || '');
