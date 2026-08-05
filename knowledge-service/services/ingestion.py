@@ -10,7 +10,7 @@ import asyncpg
 from database import get_pool
 
 from .chunking import chunk_text
-from .embedding import embed_texts
+from .embedding import embed_texts, embedding_enabled
 from .extraction import extract_pdf, extract_pdf_bytes
 
 
@@ -119,37 +119,45 @@ async def run_ingestion(job_id: str) -> None:
             )
             await _log_step(conn, job_id, "chunks_stored", f"Stored {len(chunk_ids)} chunks")
 
-            # ── Step 6: Generate embeddings ──
+            # ── Step 6: Generate embeddings (opcional según proveedor) ──
             await conn.execute(
                 "UPDATE ingestion_jobs SET status = 'embedding' WHERE id = $1", job_id
             )
 
-            batch_size = 20
-            for batch_start in range(0, len(chunks), batch_size):
-                batch_end = min(batch_start + batch_size, len(chunks))
-                batch_chunks = chunks[batch_start:batch_end]
-                batch_ids = chunk_ids[batch_start:batch_end]
+            if embedding_enabled():
+                batch_size = 20
+                for batch_start in range(0, len(chunks), batch_size):
+                    batch_end = min(batch_start + batch_size, len(chunks))
+                    batch_chunks = chunks[batch_start:batch_end]
+                    batch_ids = chunk_ids[batch_start:batch_end]
 
-                vectors = await embed_texts(batch_chunks)
+                    vectors = await embed_texts(batch_chunks)
 
-                for cid, vec in zip(batch_ids, vectors):
+                    for cid, vec in zip(batch_ids, vectors):
+                        await conn.execute(
+                            """
+                            INSERT INTO knowledge_embeddings (chunk_id, embedding, model_name, dimension)
+                            VALUES ($1, $2, $3, $4)
+                            """,
+                            cid,
+                            _format_vector(vec),
+                            "text-embedding-3-small-512",
+                            len(vec),
+                        )
+
+                    progress = 60 + int(40 * batch_end / len(chunks))
                     await conn.execute(
-                        """
-                        INSERT INTO knowledge_embeddings (chunk_id, embedding, model_name, dimension)
-                        VALUES ($1, $2, $3, $4)
-                        """,
-                        cid,
-                        _format_vector(vec),
-                        "hashing-tfidf-512",
-                        len(vec),
+                        "UPDATE ingestion_jobs SET progress = $1 WHERE id = $2",
+                        progress, job_id,
                     )
-
-                progress = 60 + int(40 * batch_end / len(chunks))
-                await conn.execute(
-                    "UPDATE ingestion_jobs SET progress = $1 WHERE id = $2",
-                    progress, job_id,
+                    await _log_step(conn, job_id, "embedding", f"Embedded chunks {batch_start+1}-{batch_end} of {len(chunks)}")
+            else:
+                # Sin embeddings: los chunks quedan con is_embedded=false y la
+                # búsqueda usa el reranker de DeepSeek para el ranking semántico.
+                await _log_step(
+                    conn, job_id, "embedding",
+                    "Embeddings deshabilitados (EMBEDDING_PROVIDER=none) — se usará el reranker",
                 )
-                await _log_step(conn, job_id, "embedding", f"Embedded chunks {batch_start+1}-{batch_end} of {len(chunks)}")
 
             # ── Step 7: Mark completed ──
             await conn.execute(

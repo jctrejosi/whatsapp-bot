@@ -3,10 +3,14 @@ services:
     name: knowledge-service
     runtime: python
     plan: free
-    buildCommand: pip install --no-cache-dir -r requirements.txt && python3 -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('intfloat/multilingual-e5-small', device='cpu')"
+    buildCommand: pip install --no-cache-dir -r requirements.txt
     startCommand: python3 -m uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
         sync: false
       - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: EMBEDDING_PROVIDER
+        sync: false
+      - key: OPENAI_API_KEY
         sync: false
