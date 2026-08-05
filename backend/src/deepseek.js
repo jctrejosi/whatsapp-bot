@@ -91,6 +91,20 @@ async function listModels() {
  * Falls back to the original query if translation fails.
  */
 async function translateToEnglish(text) {
+  // Si ya es inglés (sin caracteres no-ASCII, sin palabras comunes en español), no traducir
+  const nonAscii = (text.match(/[^\x00-\x7F]/g) || []).length;
+  const spanishMarkers = /[áéíóúñ¿¡]/.test(text);
+  if (nonAscii === 0 && !spanishMarkers) {
+    // Puede ser inglés o español sin tildes. Verificar palabras comunes.
+    const spanishWords = /\b(de|que|el|la|los|las|un|una|en|con|por|para|del|se|no|es|son|me|te|le|lo|su|mi|tu|al|como|más|pero|y|o|si|ya|muy|hay|tiene|tienen|está|están|fue|eran|hace|hacen|dice|dicen|puede|pueden|quiero|quieres|tienes|cuál|cómo|cuándo|dónde|quién|cuánto|hola|gracias|buenos|buenas|días|tardes|noches)\b/i;
+    const matchCount = (text.match(spanishWords) || []).length;
+    const wordCount = text.split(/\s+/).length;
+    // Si +30% de las palabras son españolas o hay 2+ marcadores → traducir
+    if (wordCount > 0 && matchCount / wordCount < 0.3 && matchCount < 2) {
+      return text; // probablemente inglés
+    }
+  }
+
   try {
     const { data } = await axios.post(
       'https://api.deepseek.com/chat/completions',
@@ -249,9 +263,13 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     };
   }
 
-  // 1. Retrieve relevant knowledge
+  // 0. Traducir query a inglés (mejor matching de embeddings + comprensión del modelo)
+  const queryInEnglish = await translateToEnglish(userMessage);
+  const isTranslated = queryInEnglish !== userMessage;
+
+  // 1. Retrieve relevant knowledge (usa la query traducida para evitar doble traducción)
   try {
-    relevantChunks = await searchKnowledge(userMessage, botId);
+    relevantChunks = await searchKnowledge(isTranslated ? queryInEnglish : userMessage, botId);
   } catch (err) {
     console.error('Search error:', err.message);
   }
@@ -313,6 +331,11 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     systemPrompt = systemPrompt.replace('{context}', context);
   }
 
+  // Si el mensaje fue traducido, indicar al modelo que responda en el idioma original
+  if (isTranslated) {
+    systemPrompt += `\n\n⚠️ El usuario original escribió en otro idioma: "${userMessage.substring(0, 100)}". Respóndele en ese mismo idioma, aunque los datos estén en inglés.`;
+  }
+
   messages.push({ role: 'system', content: systemPrompt });
 
   // ═══ Dynamic function list: solo las habilitadas aparecen en el prompt ═══
@@ -354,7 +377,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     messages.push({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text });
   }
 
-  messages.push({ role: 'user', content: userMessage });
+  messages.push({ role: 'user', content: queryInEnglish });
 
   // 3. Call DeepSeek with function calling
   let content;
