@@ -928,6 +928,52 @@ body {
   50% { opacity: 0.3; }
 }
 
+/* ─── Info tooltip ─── */
+.info-tip {
+  position: relative;
+  display: inline-flex;
+  cursor: help;
+  margin-left: 4px;
+  vertical-align: middle;
+  font-size: 12px;
+  line-height: 1;
+}
+.info-icon {
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.info-tip:hover .info-icon {
+  opacity: 1;
+}
+.info-popup {
+  position: fixed;
+  transform: translate(-50%, -100%);
+  background: var(--navy);
+  border: 1px solid var(--gold);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--gray-100);
+  white-space: normal;
+  width: 280px;
+  max-width: 80vw;
+  z-index: 500;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  text-align: left;
+  font-weight: 400;
+  pointer-events: none;
+}
+.info-popup::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: var(--gold);
+}
+
 /* ─── Modal de configuración: alto fijo — el encabezado queda quieto ── */
 .modal-config {
   width: 630px;

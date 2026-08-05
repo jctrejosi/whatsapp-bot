@@ -87,6 +87,48 @@ async function listModels() {
 }
 
 /**
+ * Detect if text is Spanish. Simple heuristic.
+ */
+function isSpanish(text) {
+  const spanishWords = /\b(de|que|el|la|los|las|un|una|en|con|por|para|del|se|no|es|son|me|te|le|lo|su|mi|tu|al|como|más|pero|y|o|si|ya|muy|hay|tiene|tienen|está|están|fue|eran|hace|hacen|dice|dicen|puede|pueden|quiero|quieres|tienes|cuál|cómo|cuándo|dónde|quién|cuánto|hola|gracias|buenos|buenas|días|tardes|noches)\b/i;
+  const matchCount = (text.match(spanishWords) || []).length;
+  const wordCount = text.split(/\s+/).filter(w => w.length > 1).length;
+  const hasSpecialChars = /[áéíóúñ¿¡]/.test(text);
+  // Spanish if: has special chars OR >20% of words are Spanish markers
+  return hasSpecialChars || (wordCount > 0 && matchCount / wordCount >= 0.2 && matchCount >= 1);
+}
+
+/**
+ * Translate text from English to Spanish using DeepSeek.
+ */
+async function translateToSpanish(text) {
+  if (!text || text.length < 5) return text;
+  try {
+    const { data } = await axios.post(
+      'https://api.deepseek.com/chat/completions',
+      {
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: 'Translate the following text to Spanish. Keep emojis, markdown formatting, and line breaks. Return ONLY the translation.' },
+          { role: 'user', content: text.substring(0, 3000) },
+        ],
+        temperature: 0,
+        max_tokens: 4000,
+      },
+      { headers: DEEPSEEK_HEADERS, timeout: 10000 }
+    );
+    const translated = data.choices[0].message.content?.trim();
+    if (translated && translated.length > 0) {
+      console.log(`  🌐 Response translated to Spanish (${text.length} → ${translated.length} chars)`);
+      return translated;
+    }
+  } catch (err) {
+    console.warn('  🌐 Response translation failed:', err.message);
+  }
+  return text;
+}
+
+/**
  * Translate a query to English for better cross-lingual embedding matches.
  * Falls back to the original query if translation fails.
  */
@@ -333,7 +375,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
 
   // Si el mensaje fue traducido, indicar al modelo que responda en el idioma original
   if (isTranslated) {
-    systemPrompt += `\n\n⚠️ El usuario original escribió en otro idioma: "${userMessage.substring(0, 100)}". Respóndele en ese mismo idioma, aunque los datos estén en inglés.`;
+    systemPrompt = `⚠️ INSTRUCCIÓN CRÍTICA: El usuario original escribe en español. TÚ DEBES responder en español. No respondas en inglés bajo ninguna circunstancia, aunque los DATOS DISPONIBLES estén en inglés. Mensaje original del usuario: "${userMessage.substring(0, 100)}"\n\n${systemPrompt}`;
   }
 
   messages.push({ role: 'system', content: systemPrompt });
@@ -391,6 +433,28 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
       .replace(/<\?xml[\s\S]*?\?>/gi, '')
       .replace(/<invoke[\s\S]*?<\/invoke>/gi, '')
       .trim();
+
+    // ═══ Post-response language validation: si el usuario escribió en español
+    //      y el modelo respondió en inglés, traducir la respuesta ═══
+    if (isTranslated && isSpanish(userMessage) && content && !isSpanish(content)) {
+      console.log('  🌐 Response is in English but user wrote in Spanish — translating back...');
+      content = await translateToSpanish(content);
+    }
+
+    // ═══ HARD validation: si no hay chunks en la BD, el modelo NO puede
+    //      responder con información que no venga de una función ═══
+    if (relevantChunks.length === 0 && content && !escalated && !emailSent) {
+      const looksLikeKnowledge = (
+        /\$[\d,]+/.test(content) ||           // menciona precios
+        /\d{1,2}\s*(de|th|rd)\s/.test(content) ||  // menciona fechas
+        /incluye|incluyen|ofrece|contiene/i.test(content) ||  // describe características
+        content.length > 400                     // respuesta larga sin fuente
+      );
+      if (looksLikeKnowledge) {
+        console.log('  🛑 Response blocked: no chunks in DB but model generated knowledge claims');
+        content = 'No tengo esa información en mi base de conocimiento. ¿Quieres que contacte a un asesor?';
+      }
+    }
     emailSent = msg._emailSent === true;
     if (msg._escalate) {
       escalated = true;

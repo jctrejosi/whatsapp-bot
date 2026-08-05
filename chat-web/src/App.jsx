@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import ReactDOM from 'react-dom';
 import { chat, getBots, createBot, deleteBot, updateBot, healthCheck, getSettings, updateSettings, resetSettings, sendTestEmail, getBotSettings, updateBotSettings, resetBotSettings, sendBotTestEmail, botChat, getBotKnowledge, uploadBotFile, deleteBotSource, getModels, getBotModels, getBotSourceDownloadUrl, getFunctions } from './api.js';
 
 /* ─── Message Bubble ──────────────────── */
@@ -372,11 +373,11 @@ function SourceList({ refreshKey }) {
 }
 
 /* ─── Settings Panel (admin) ───────────── */
-function SliderRow({ label, hint, value, min, max, step, onChange }) {
+function SliderRow({ label, hint, value, min, max, step, onChange, info }) {
   return (
     <div className="settings-row">
       <div className="row-top">
-        <label>{label}</label>
+        <label>{label}{info && <InfoTip text={info} />}</label>
         <span className="value">{value}</span>
       </div>
       <input
@@ -653,7 +654,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
               <h3>🧠 Configuración del modelo</h3>
               <div className="settings-row">
                 <div className="row-top">
-                  <label>Modelo DeepSeek</label>
+                  <label>Modelo DeepSeek <InfoTip text="Modelo de DeepSeek que se usará para generar respuestas. deepseek-chat = más potente (recomendado). deepseek-v4-flash = más rápido y barato. La lista se consulta automáticamente desde tu API key." /></label>
                   <span className="value">{settings.model}</span>
                 </div>
                 <select
@@ -679,6 +680,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
               <SliderRow
                 label="Creatividad (temperature)"
                 hint="Más alto = respuestas más variadas; más bajo = más consistentes."
+                info="Controla qué tan creativo o determinista es el modelo. 0 = siempre responde igual, 1.5 = respuestas muy variadas e impredecibles. Valor recomendado: 0.7"
                 value={settings.temperature}
                 min={0} max={1.5} step={0.05}
                 onChange={(v) => set('temperature', v)}
@@ -686,6 +688,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
               <SliderRow
                 label="Fragmentos de conocimiento (top_k)"
                 hint="Cuántos fragmentos del conocimiento se usan por respuesta."
+                info="Número de chunks del PDF que se pasan al modelo como contexto. Más fragmentos = más contexto pero más tokens y latencia. Valor recomendado: 3-5"
                 value={settings.topK}
                 min={1} max={10} step={1}
                 onChange={(v) => set('topK', v)}
@@ -693,6 +696,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
               <SliderRow
                 label="Mensajes de contexto (historial)"
                 hint="Turnos previos que se envían al modelo para mantener el contexto."
+                info="Cantidad de mensajes anteriores (usuario + bot) que se mantienen en la memoria de la conversación. Más mensajes = mejor contexto pero más tokens. Valor recomendado: 6"
                 value={settings.maxHistoryMessages}
                 min={1} max={30} step={1}
                 onChange={(v) => set('maxHistoryMessages', v)}
@@ -700,6 +704,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
               <SliderRow
                 label="Confianza mínima de búsqueda"
                 hint="Similitud mínima (0-1) para considerar un fragmento relevante."
+                info="Umbral de similitud semántica. Solo los fragmentos con similitud >= este valor se pasan al modelo. 0 = devolver todos (más ruido), 1 = solo matches perfectos (casi nada). Valor recomendado: 0.05-0.15"
                 value={settings.minConfidence}
                 min={0} max={1} step={0.05}
                 onChange={(v) => set('minConfidence', v)}
@@ -707,6 +712,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
               <SliderRow
                 label="Máximo de tokens por respuesta"
                 hint="Tope de tokens de la primera respuesta del modelo."
+                info="Límite de tokens (palabras) que el modelo puede generar en su respuesta. Si la respuesta se corta, el sistema reintenta con más tokens. Valor recomendado: 2000-4000"
                 value={settings.maxTokens}
                 min={256} max={8192} step={128}
                 onChange={(v) => set('maxTokens', v)}
@@ -714,6 +720,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
               <SliderRow
                 label="Intentos sin respuesta clara"
                 hint="Si el bot falla N veces seguidas, ofrece asesor. 0 = desactivado."
+                info="Número de veces que el bot puede no encontrar información antes de ofrecer contactar a un asesor automáticamente. Útil para evitar que el usuario se frustre. 0 = nunca ofrece asesor automático."
                 value={settings.maxNegativeResponses}
                 min={0} max={20} step={1}
                 onChange={(v) => set('maxNegativeResponses', v)}
@@ -724,10 +731,10 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
                   checked={settings.useReranker}
                   onChange={(e) => set('useReranker', e.target.checked)}
                 />
-                <span>Usar reranker (DeepSeek V4 Pro) en la búsqueda</span>
+                <span>Usar reranker (DeepSeek V4 Pro) en la búsqueda <InfoTip text="Cuando está activo, los fragmentos recuperados se re-evalúan con DeepSeek V4 Pro para mejorar la relevancia. Aumenta la calidad de las respuestas pero añade ~1-2s de latencia." /></span>
               </label>
 
-              <h3 style={{ marginTop: 24 }}>📝 Prompt / Instrucciones</h3>
+              <h3 style={{ marginTop: 24 }}>📝 Prompt / Instrucciones <InfoTip text="Define la personalidad, tono y reglas del bot. Usa {context} como marcador — se reemplazará automáticamente con la información del PDF que subas. Si lo dejás vacío, el bot usa un prompt general predefinido." /></h3>
               <p className="settings-hint">
                 Define la personalidad y comportamiento del bot. Usa <code>{'{context}'}</code> como
                 marcador donde se insertará automáticamente la información del PDF subido.
@@ -745,7 +752,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
 
           {tab === 'notifications' && (
             <div className="settings-section">
-              <h3>📧 Notificación a asesores</h3>
+              <h3>📧 Notificación a asesores <InfoTip text="Cuando un cliente pide hablar con una persona real, el sistema envía un correo a todos los asesores configurados aquí. Podés agregar varios." /></h3>
               <p className="settings-hint">
                 Correos que reciben el aviso cuando un cliente pide hablar con un asesor.
               </p>
@@ -773,7 +780,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
                 <button className="btn btn-primary btn-sm" onClick={addEmail}>Agregar</button>
               </div>
               <div className="email-add">
-                <span className="email-add-label">Remitente</span>
+                <span className="email-add-label">Remitente <InfoTip text="Dirección de correo que aparece como remitente. Debe usar un dominio verificado en Resend (resend.com/domains). Si aún no tenés dominio, usá onboarding@resend.dev para pruebas (solo envía a tu propio email)." /></span>
                 <input
                   type="email"
                   placeholder="bot@tudominio.com"
@@ -782,7 +789,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
                 />
               </div>
               <div className="email-add">
-                <span className="email-add-label">API Key</span>
+                <span className="email-add-label">API Key <InfoTip text="API Key de Resend. La encontrás en resend.com → Settings → API Keys. Formato: re_XXXX..." /></span>
                 <input
                   type="password"
                   placeholder="re_..."
@@ -803,7 +810,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
 
           {tab === 'chat' && (
             <div className="settings-section">
-              <h3>📨 Mensaje de bienvenida</h3>
+              <h3>📨 Mensaje de bienvenida <InfoTip text="Primer mensaje que ve el usuario al iniciar chat con este bot. Si se deja vacío, no se muestra ningún saludo. Podés usar emojis y saltos de línea." /></h3>
               <p className="settings-hint">
                 Mensaje que muestra el bot al iniciar una conversación nueva. Si se deja vacío, no se muestra ningún saludo.
               </p>
@@ -905,11 +912,11 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
               </div>
               <div className="settings-section">
                 <h3>🔍 Búsqueda (RAG)</h3>
-                <SliderRow label="Fragmentos (top_k)" hint="Fragmentos usados por respuesta." value={settings.topK} min={1} max={10} step={1} onChange={(v) => set('topK', v)} />
-                <SliderRow label="Confianza mínima" hint="Similitud mínima para considerar un fragmento." value={settings.minConfidence} min={0} max={1} step={0.05} onChange={(v) => set('minConfidence', v)} />
+                <SliderRow label="Fragmentos (top_k)" hint="Fragmentos usados por respuesta." info="Número de chunks del conocimiento que se recuperan y se pasan al modelo como contexto." value={settings.topK} min={1} max={10} step={1} onChange={(v) => set('topK', v)} />
+                <SliderRow label="Confianza mínima" hint="Similitud mínima para considerar un fragmento." info="Umbral de similitud semántica (0-1). Solo los fragmentos con puntuación >= este valor se consideran relevantes. 0.05 = casi todo, 0.5 = solo matches fuertes." value={settings.minConfidence} min={0} max={1} step={0.05} onChange={(v) => set('minConfidence', v)} />
                 <label className="toggle-row">
                   <input type="checkbox" checked={settings.useReranker} onChange={(e) => set('useReranker', e.target.checked)} />
-                  <span>Usar reranker</span>
+                  <span>Usar reranker <InfoTip text="Re-evalúa los fragmentos con DeepSeek V4 Pro para mejorar la precisión. Más lento pero más relevante." /></span>
                 </label>
               </div>
             </>
@@ -919,20 +926,32 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
             <>
               <div className="settings-section">
                 <h3>🔗 Conexión WhatsApp</h3>
-                <p className="settings-hint">Configura las credenciales de Meta for Developers para este bot.</p>
-                <label className="settings-label">App ID</label>
+                <p className="settings-hint">
+                  Credenciales de Meta for Developers.{' '}
+                  <a href="https://developers.facebook.com/docs/whatsapp/cloud-api/get-started" target="_blank" rel="noopener" style={{ color: 'var(--gold-light)' }}>
+                    Guía oficial →
+                  </a>
+                </p>
+
+                <label className="settings-label">App ID <InfoTip text="Ve a Meta for Developers → Mis Apps → [tu app] → Configuración → Básica → App ID." /></label>
                 <input className="bot-name-input" type="text" placeholder="123456789" value={settings.whatsappAppId} onChange={(e) => set('whatsappAppId', e.target.value)} style={{ marginBottom: 8, width: '100%' }} />
-                <label className="settings-label">App Secret</label>
+
+                <label className="settings-label">App Secret <InfoTip text="En el mismo lugar que el App ID (Configuración → Básica). Requiere verificación 2FA de Meta para verlo." /></label>
                 <input className="bot-name-input" type="password" placeholder="••••••••" value={settings.whatsappAppSecret} onChange={(e) => set('whatsappAppSecret', e.target.value)} style={{ marginBottom: 8, width: '100%' }} />
-                <label className="settings-label">WABA ID</label>
+
+                <label className="settings-label">WABA ID <InfoTip text="Ve a Meta Business Suite → WhatsApp Manager → tu cuenta de WhatsApp Business. El WABA ID sale en la URL o en 'Configuración de la cuenta'." /></label>
                 <input className="bot-name-input" type="text" placeholder="123456789" value={settings.whatsappWabaId} onChange={(e) => set('whatsappWabaId', e.target.value)} style={{ marginBottom: 8, width: '100%' }} />
-                <label className="settings-label">Phone Number ID</label>
+
+                <label className="settings-label">Phone Number ID <InfoTip text="En WhatsApp Manager → Teléfonos → selecciona tu número → copia el Phone Number ID (no es el número de teléfono, es un ID numérico)." /></label>
                 <input className="bot-name-input" type="text" placeholder="123456789" value={settings.whatsappPhoneNumberId} onChange={(e) => set('whatsappPhoneNumberId', e.target.value)} style={{ marginBottom: 8, width: '100%' }} />
-                <label className="settings-label">Access Token (opcional, se genera si no se pone)</label>
+
+                <label className="settings-label">Access Token <InfoTip text="En Meta for Developers → [tu app] → WhatsApp → API Setup. Genera un token de acceso temporal (24h) o permanente. Requiere permisos: whatsapp_business_messaging y whatsapp_business_management. Si no lo pones, el sistema intenta generar uno automáticamente." /></label>
                 <input className="bot-name-input" type="password" placeholder="EAA..." value={settings.whatsappAccessToken} onChange={(e) => set('whatsappAccessToken', e.target.value)} style={{ marginBottom: 8, width: '100%' }} />
-                <label className="settings-label">Verify Token (webhook)</label>
+
+                <label className="settings-label">Verify Token (webhook) <InfoTip text="Crea un token secreto cualquiera (ej: 'mi-token-2024'). En Meta, en Configuración del Webhook, pega este mismo token. Meta lo usará para verificar que el webhook es tuyo." /></label>
                 <input className="bot-name-input" type="text" placeholder="mi-token-secreto" value={settings.whatsappVerifyToken} onChange={(e) => set('whatsappVerifyToken', e.target.value)} style={{ marginBottom: 8, width: '100%' }} />
-                <label className="settings-label">Número de teléfono</label>
+
+                <label className="settings-label">Número de teléfono <InfoTip text="El número de WhatsApp Business registrado con el prefijo del país. Ej: +573001234567. Debe ser el número asociado al WABA y Phone Number ID ingresados arriba." /></label>
                 <input className="bot-name-input" type="text" placeholder="+1234567890" value={settings.whatsappPhone} onChange={(e) => set('whatsappPhone', e.target.value)} style={{ width: '100%' }} />
               </div>
             </>
@@ -993,7 +1012,38 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
   );
 }
 
-/* ─── Header ──────────────────────────── */
+/* ─── Info Icon ─────────────────────────── */
+function InfoTip({ text }) {
+  const [show, setShow] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const iconRef = useRef(null);
+
+  const handleShow = () => {
+    if (iconRef.current) {
+      const r = iconRef.current.getBoundingClientRect();
+      setPos({ top: r.top - 8, left: r.left + r.width / 2 });
+    }
+    setShow(true);
+  };
+
+  return (
+    <span className="info-tip" ref={iconRef}
+      onMouseEnter={handleShow}
+      onMouseLeave={() => setShow(false)}
+      onClick={() => setShow((s) => !s)}
+    >
+      <span className="info-icon">ℹ️</span>
+      {show && ReactDOM.createPortal(
+        <span className="info-popup" style={{ top: pos.top, left: pos.left }}>
+          {text}
+        </span>,
+        document.body
+      )}
+    </span>
+  );
+}
+
+/* ─── Slider Row ────────────────────────── */
 function Header({ status, error, checking, onRetry, onMenuToggle, botName }) {
   const label =
     status === true ? '✅ API conectada' :
