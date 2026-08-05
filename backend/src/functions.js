@@ -219,15 +219,15 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'enviar_correo_informacion',
-      description: 'Envía por correo electrónico la información que el cliente solicitó. Debe llamarse cuando el cliente pide que le envíen información por email. IMPORTANTE: antes de llamarla, el cliente debe dar su correo electrónico; si no lo tienes, pídelo primero.',
+      description: 'Envía por correo electrónico la información que el cliente solicitó. Usa esta función cuando el cliente pida que le manden algo por email. IMPORTANTE: incluye SIEMPRE el parámetro "informacion" con TODO el contenido relevante que se haya discutido (precios, itinerario, características, etc.). También incluye "asunto" descriptivo. Si el cliente no ha dado su correo, pídelo primero.',
       parameters: {
         type: 'object',
         properties: {
           email:    { type: 'string', description: 'Correo electrónico del cliente.' },
-          informacion: { type: 'string', description: 'Contenido de la información solicitada.' },
+          informacion: { type: 'string', description: 'TODA la información que el cliente solicitó (precios, itinerario, características, fechas, etc.).' },
           asunto:   { type: 'string', description: 'Asunto breve y descriptivo del correo.' },
         },
-        required: ['email'],
+        required: ['email', 'informacion'],
       },
     },
   },
