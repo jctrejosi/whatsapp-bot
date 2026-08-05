@@ -160,8 +160,12 @@ async function callDeepSeek(messages, tools = null, attempt = 1, botId) {
           toolResults.push({
             role: 'tool',
             tool_call_id: toolCall.id,
-            // Si la función devuelve null (sin datos configurados), enviar un JSON válido
-            content: JSON.stringify(result ?? { ok: false, error: 'No hay datos configurados para esta función' }),
+            // Si la función devuelve null (sin datos configurados), indicar al modelo
+            // que busque en el contexto (RAG) — así no se rinde y usa los chunks.
+            content: JSON.stringify(result ?? {
+              ok: false,
+              mensaje: 'Datos no configurados. Extrae la información del contexto disponible.',
+            }),
           });
         }
       }
