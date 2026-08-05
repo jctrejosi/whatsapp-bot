@@ -2,6 +2,9 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { chat, getBots, createBot, deleteBot, updateBot, healthCheck, getSettings, updateSettings, resetSettings, sendTestEmail, getBotSettings, updateBotSettings, resetBotSettings, sendBotTestEmail, botChat, getBotKnowledge, uploadBotFile, deleteBotSource, getModels, getBotModels, getBotSourceDownloadUrl, getFunctions } from './api.js';
 
+/* ─── Emojis disponibles para el ícono del bot ─── */
+const BOT_ICONS = ['🤖', '🚢', '🎀', '💃', '🛳️', '👗', '💍', '🎂', '🍕', '🛒', '💼', '🎓', '🏨', '✈️', '⚽', '🎮'];
+
 /* ─── Message Bubble ──────────────────── */
 function MessageBubble({ msg, botName }) {
   const isUser = msg.role === 'user';
@@ -393,7 +396,7 @@ function SliderRow({ label, hint, value, min, max, step, onChange, info }) {
   );
 }
 
-function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onBotUpdated }) {
+function SettingsPanel({ open, onClose, botId, botName, botIcon, creating, onCreated, onBotUpdated }) {
   const [settings, setSettings] = useState(null);
   const [newEmail, setNewEmail] = useState('');
   const [botNameInput, setBotNameInput] = useState('');
@@ -405,6 +408,9 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
   // Inline name editing
   const [nameEdit, setNameEdit] = useState(false);
   const [nameValue, setNameValue] = useState('');
+  // Ícono del bot
+  const [iconEdit, setIconEdit] = useState(false);
+  const [iconValue, setIconValue] = useState('🤖');
   // Knowledge tab
   const [sources, setSources] = useState([]);
   const [uploading, setUploading] = useState(false);
@@ -428,10 +434,12 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
     setMsg('');
     setTestResult('');
     setBotNameInput(botId ? (botName || '') : '');
+    setIconValue(botIcon || '🤖');
     if (justOpened) {
       setTab('model');
       setNameEdit(false);
       setNameValue(botName || '');
+      setIconEdit(false);
     }
     const fetchSettings = botId ? getBotSettings(botId) : getSettings();
     fetchSettings
@@ -566,6 +574,18 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
     }
   };
 
+  /** Guarda el ícono elegido (edición) o solo lo deja pendiente (creación). */
+  const pickIcon = (emoji) => {
+    const ic = (emoji || '🤖').trim().slice(0, 4) || '🤖';
+    setIconValue(ic);
+    setIconEdit(false);
+    if (botId) {
+      updateBot(botId, { icon: ic })
+        .then(() => onBotUpdated?.())
+        .catch((e) => setMsg('❌ ' + e.message));
+    }
+  };
+
   const save = async () => {
     setSaving(true);
     setMsg('');
@@ -577,15 +597,18 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
           setSaving(false);
           return;
         }
-        const { bot } = await createBot(name, '');
+        const { bot } = await createBot(name, '', iconValue);
         await updateBotSettings(bot.id, settings);
         originalRef.current = settings; // lo recién creado queda como base
         onCreated(bot); // el padre lo agrega, lo selecciona y pasa a modo edición
         setMsg('✅ Bot creado. Ahora puedes subir su conocimiento y ajustar lo que quieras.');
       } else {
-        // Si el nombre cambió, actualizarlo en la tabla bots
-        if (botId && name && name !== (botName || '')) {
-          await updateBot(botId, { name });
+        // Si el nombre o el ícono cambió, actualizarlos en la tabla bots
+        const botPatch = {};
+        if (name && name !== (botName || '')) botPatch.name = name;
+        if (iconValue && iconValue !== (botIcon || '🤖')) botPatch.icon = iconValue;
+        if (botId && Object.keys(botPatch).length > 0) {
+          await updateBot(botId, botPatch);
           onBotUpdated?.();
         }
         const saved = botId ? await updateBotSettings(botId, settings) : await updateSettings(settings);
@@ -636,6 +659,14 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
     <div className="modal-overlay" onClick={uploading || saving ? undefined : requestClose}>
       <div className="modal modal-config" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
+          <button
+            className={`bot-icon${iconEdit ? ' editing' : ''}`}
+            onClick={() => setIconEdit((v) => !v)}
+            title="Cambiar ícono"
+            aria-label="Cambiar ícono"
+          >
+            {iconValue || '🤖'}
+          </button>
           {creating || nameEdit ? (
             <input
               className="bot-name-input"
@@ -669,6 +700,18 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
           )}
           <button className="btn btn-secondary btn-sm" onClick={requestClose} disabled={uploading || saving}>✕</button>
         </div>
+        {iconEdit && (
+          <div className="icon-picker">
+            {BOT_ICONS.map((i) => (
+              <button
+                key={i}
+                className={`icon-option${iconValue === i ? ' active' : ''}`}
+                onClick={() => pickIcon(i)}
+                title={i}
+              >{i}</button>
+            ))}
+          </div>
+        )}
         <div className="settings-tabs">
           <button className={`tab-btn${tab === 'model' ? ' active' : ''}`} onClick={() => setTab('model')}>🧠 Modelo</button>
           <button className={`tab-btn${tab === 'knowledge' ? ' active' : ''}`} onClick={() => setTab('knowledge')}>📚 Conocimiento</button>
@@ -1098,7 +1141,7 @@ function InfoTip({ text }) {
 }
 
 /* ─── Slider Row ────────────────────────── */
-function Header({ status, error, checking, onRetry, onMenuToggle, botName }) {
+function Header({ status, error, checking, onRetry, onMenuToggle, botName, botIcon }) {
   const label =
     status === true ? '✅ API conectada' :
     status === false ? '🔴 ' + (error || 'API desconectada') :
@@ -1107,7 +1150,8 @@ function Header({ status, error, checking, onRetry, onMenuToggle, botName }) {
 
   return (
     <div className="header">
-      <h1>🚢 {botName || 'Plataforma'} — Knowledge Chat</h1>
+      <h1>{botIcon || '🚢'} {botName || 'Plataforma'} — Knowledge Chat</h1>
+      <h1>🚢 {botName || 'Plataforma'}</h1>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
         {cls && <span className={`status-dot ${cls}${checking ? ' pulse' : ''}`} />}
         <span style={{ color: 'var(--gray-200)' }}>{label}</span>
@@ -1294,7 +1338,7 @@ export default function App() {
               className={`bot-card${selectedBotId === bot.id ? ' selected' : ''}`}
               onClick={() => { setSelectedBotId(bot.id); setSidebarOpen(false); }}
             >
-              <div className="bot-name">{bot.name}</div>
+              <div className="bot-name">{bot.icon || '🤖'} {bot.name}</div>
               <div className="bot-actions">
                 <button
                   className="btn btn-secondary btn-sm"
@@ -1345,6 +1389,7 @@ export default function App() {
           onRetry={retryConnection}
           onMenuToggle={() => setSidebarOpen((o) => !o)}
           botName={selectedBot?.name}
+          botIcon={selectedBot?.icon}
         />
         <ChatPanel
           online={online === true}
@@ -1362,6 +1407,7 @@ export default function App() {
         onClose={() => setSettingsOpen(false)}
         botId={selectedBotId}
         botName={selectedBot?.name || ''}
+        botIcon={selectedBot?.icon}
         creating={creatingBot}
         onCreated={(bot) => {
           setBots((prev) => [...prev, bot]);

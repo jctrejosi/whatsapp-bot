@@ -93,8 +93,8 @@ export async function getBots() {
   return handleResponse(res, `Error ${res.status} al cargar bots`);
 }
 
-export async function createBot(name, description) {
-  const res = await fetch(`${API_URL}/bots`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, description }) });
+export async function createBot(name, description, icon) {
+  const res = await fetch(`${API_URL}/bots`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, description, icon }) });
   return handleResponse(res, `Error ${res.status} al crear bot`);
 }
 
