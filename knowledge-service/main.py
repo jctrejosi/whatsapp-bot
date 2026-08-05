@@ -110,7 +110,7 @@ class ChatResponse(BaseModel):
 
 @app.post("/ingest", status_code=201)
 @app.post("/ingest")
-async def ingest_file(file: UploadFile = File(...), bot_id: str = Form(None)):
+async def ingest_file(file: UploadFile = File(...), bot_id: str = Form(None), cloudinary_url: str = Form(None)):
     """
     Upload a file (PDF, DOCX, XLSX, PPTX, CSV, TXT, code, etc.) and trigger the
     full ingestion pipeline: extract → chunk → embed → store in pgvector.
@@ -141,8 +141,8 @@ async def ingest_file(file: UploadFile = File(...), bot_id: str = Form(None)):
             """
             INSERT INTO knowledge_sources (id, source_type, title, description,
                  original_filename, file_path, file_type, file_size_bytes,
-                 status, metadata, bot_id)
-            VALUES ($1, 'file', $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
+                 status, metadata, bot_id, cloudinary_url)
+            VALUES ($1, 'file', $2, $3, $4, $5, $6, $7, 'pending', $8, $9, $10)
             """,
             source_id,
             extract_result.metadata.get("title") if extract_result.metadata else file.filename,
@@ -153,6 +153,7 @@ async def ingest_file(file: UploadFile = File(...), bot_id: str = Form(None)):
             len(contents),
             json.dumps({"file_metadata": extract_result.metadata} if extract_result.metadata else {}),
             bot_id,
+            cloudinary_url or None,
         )
 
         # Create ingestion job (inside the connection scope)
@@ -230,7 +231,8 @@ async def list_sources(status: Optional[str] = None, bot_id: Optional[str] = Non
             "original_filename": r["original_filename"],
             "file_type": r["file_type"],
             "file_size_bytes": r["file_size_bytes"],
-            "file_available": bool(r["file_path"] and os.path.exists(r["file_path"])),
+            "file_available": bool((r["file_path"] and os.path.exists(r["file_path"])) or r["cloudinary_url"]),
+            "cloudinary_url": r["cloudinary_url"],
             "created_at": r["created_at"].isoformat(),
             "updated_at": r["updated_at"].isoformat(),
         }
@@ -304,7 +306,8 @@ async def get_source(source_id: str):
                 "original_filename": source["original_filename"],
                 "file_type": source["file_type"],
                 "file_size_bytes": source["file_size_bytes"],
-                "file_available": bool(source["file_path"] and os.path.exists(source["file_path"])),
+                "file_available": bool((source["file_path"] and os.path.exists(source["file_path"])) or source["cloudinary_url"]),
+                "cloudinary_url": source["cloudinary_url"],
                 "metadata": source["metadata"],
                 "created_at": source["created_at"].isoformat(),
                 "updated_at": source["updated_at"].isoformat(),
@@ -324,26 +327,31 @@ async def get_source(source_id: str):
 
 @app.get("/sources/{source_id}/download")
 async def download_source(source_id: str):
-    """Serve the original uploaded file, if it still exists on disk."""
+    """Serve the original uploaded file. Tries local disk first, then Cloudinary."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT original_filename, file_path, file_type FROM knowledge_sources WHERE id = $1",
+            "SELECT original_filename, file_path, file_type, cloudinary_url FROM knowledge_sources WHERE id = $1",
             source_id,
         )
     if not row:
         raise HTTPException(404, "Fuente no encontrada")
 
     path = row["file_path"]
-    if not path or not os.path.exists(path):
-        raise HTTPException(404, "El archivo original no está disponible en este servidor")
+    if path and os.path.exists(path):
+        filename = row["original_filename"] or os.path.basename(path)
+        return FileResponse(
+            path,
+            media_type=row["file_type"] or "application/octet-stream",
+            filename=filename,
+        )
 
-    filename = row["original_filename"] or os.path.basename(path)
-    return FileResponse(
-        path,
-        media_type=row["file_type"] or "application/octet-stream",
-        filename=filename,
-    )
+    # Fallback: redirect to Cloudinary (permanent, survives deploys)
+    if row["cloudinary_url"]:
+        from starlette.responses import RedirectResponse
+        return RedirectResponse(url=row["cloudinary_url"])
+
+    raise HTTPException(404, "El archivo original no está disponible en este servidor")
 
 
 @app.delete("/sources/{source_id}")

@@ -306,6 +306,7 @@ app.post('/bots/:id/knowledge/upload', async (req, res) => {
       const form = new FormData();
       form.append('file', req.file.buffer, { filename: req.file.originalname, contentType: req.file.mimetype });
       if (req.params.id) form.append('bot_id', req.params.id);
+      if (cloudResult.url) form.append('cloudinary_url', cloudResult.url);
       const { data } = await axios.post(`${KNOWLEDGE_URL}/ingest`, form, {
         headers: { ...form.getHeaders() },
         maxBodyLength: Infinity,
