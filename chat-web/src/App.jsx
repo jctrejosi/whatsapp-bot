@@ -466,15 +466,31 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
 
   const handleUpload = async (e) => {
     const file = e.target.files?.[0];
-    if (!file || !botId) return;
+    if (!file) return;
+
+    // En modo creación: crear el bot automáticamente para poder subir archivos
+    let currentBotId = botId;
+    if (creating && !currentBotId) {
+      const name = botNameInput.trim() || 'Nuevo Bot';
+      try {
+        const { bot } = await createBot(name, '');
+        currentBotId = bot.id;
+        await updateBotSettings(bot.id, settings);
+        onCreated(bot); // transiciona a modo edición con el bot recién creado
+      } catch (err) {
+        setMsg('❌ Error al crear el bot: ' + err.message);
+        return;
+      }
+    }
+
+    if (!currentBotId) return;
     setUploading(true);
     setMsg('');
     try {
-      await uploadBotFile(botId, file);
+      await uploadBotFile(currentBotId, file);
       setMsg('✅ Archivo subido. Procesando...');
-      // Refrescar lista tras un momento
       setTimeout(async () => {
-        try { setSources(await getBotKnowledge(botId)); } catch {}
+        try { setSources(await getBotKnowledge(currentBotId)); } catch {}
         setMsg('');
       }, 3000);
     } catch (err) {
@@ -839,13 +855,13 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
             <>
               <div className="settings-section">
                 <h3>📁 Archivos cargados ({sources.length})</h3>
-                {creating && (
+                {creating && sources.length === 0 && (
                   <p className="settings-hint">
-                    Primero guarda el bot para poder subir archivos de conocimiento.
+                    Sube archivos para entrenar al bot. Al subir el primero se creará el bot automáticamente.
                   </p>
                 )}
                 {!creating && sources.length === 0 && (
-                  <p className="settings-hint">No hay archivos. Sube un PDF para entrenar al bot.</p>
+                  <p className="settings-hint">No hay archivos. Sube uno para entrenar al bot.</p>
                 )}
                 {sources.map((s) => (
                   <div key={s.id} className="source-row">
@@ -856,30 +872,23 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: 6 }}>
-                      {s.file_available && (
-                        <a
-                          className="btn btn-secondary btn-sm"
-                          href={botId ? getBotSourceDownloadUrl(botId, s.id) : '#'}
-                          download
-                          title="Descargar archivo"
-                        >⬇️</a>
-                      )}
+                      <a
+                        className="btn btn-secondary btn-sm"
+                        href={botId ? getBotSourceDownloadUrl(botId, s.id) : '#'}
+                        download
+                        title={s.file_available ? 'Descargar archivo' : 'Archivo no disponible (re-súbelo para habilitar descarga)'}
+                        style={{ opacity: s.file_available ? 1 : 0.4 }}
+                      >⬇️</a>
                       <button className="btn btn-secondary btn-sm" onClick={() => handleDeleteSource(s.id)}>🗑️</button>
                     </div>
                   </div>
                 ))}
               </div>
               <div className="settings-section">
-                {creating ? (
-                  <p className="settings-hint" style={{ fontSize: 12 }}>
-                    📤 La subida de PDFs se habilita después de crear el bot.
-                  </p>
-                ) : (
-                  <label className="btn btn-primary btn-block" style={{ cursor: 'pointer', textAlign: 'center', display: 'block' }}>
-                    {uploading ? '⏳ Subiendo...' : '📤 Subir archivo'}
-                    <input type="file" accept=".pdf,.docx,.pptx,.xlsx,.xls,.csv,.txt,.md,.html,.json,.xml,.yaml,.yml,.py,.js,.ts,.java,.cpp,.odt,.ods,.odp,.rtf" style={{ display: 'none' }} onChange={handleUpload} disabled={uploading} />
-                  </label>
-                )}
+                <label className="btn btn-primary btn-block" style={{ cursor: 'pointer', textAlign: 'center', display: 'block' }}>
+                  {uploading ? '⏳ Subiendo...' : creating ? '📤 Subir archivo (se creará el bot automáticamente)' : '📤 Subir archivo'}
+                  <input type="file" accept=".pdf,.docx,.pptx,.xlsx,.xls,.csv,.txt,.md,.html,.json,.xml,.yaml,.yml,.py,.js,.ts,.java,.cpp,.odt,.ods,.odp,.rtf" style={{ display: 'none' }} onChange={handleUpload} disabled={uploading} />
+                </label>
               </div>
               <div className="settings-section">
                 <h3>🔍 Búsqueda (RAG)</h3>
