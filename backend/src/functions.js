@@ -241,7 +241,7 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'iniciar_cierre_venta',
-      description: 'Usa esta función cuando el cliente está listo para comprar o reservar. IMPORTANTE: antes de llamarla, pídele al cliente sus datos de contacto (nombre y teléfono o correo). También pregunta cuántas personas serán y qué opción prefiere.',
+      description: 'Registra la reserva y notifica al equipo de ventas. IMPORTANTE: usa los datos que el cliente YA proporcionó durante la conversación (nombre, teléfono, correo, número de personas, tipo de cabina). NO vuelvas a pedir datos ya mencionados — solo confírmalos con el cliente antes de llamar esta función. Si falta algún dato esencial, pide SOLO el dato faltante, no todos.',
       parameters: {
         type: 'object',
         properties: {
