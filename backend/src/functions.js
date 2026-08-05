@@ -9,6 +9,44 @@ const { sendClientEmail } = require('./escalation');
 const { getSettings } = require('./settings');
 
 /**
+ * Busca el precio de un tipo de cabina con matching tolerante:
+ * el modelo puede pasar "Deluxe Balcony" mientras la clave es "Balcón Deluxe (BR2)".
+ */
+function findPricing(precios, tipo) {
+  if (!precios) return null;
+  if (!tipo) return Object.values(precios)[0] || null;
+
+  // 1) Coincidencia exacta
+  if (precios[tipo]) return precios[tipo];
+
+  // 2) Coincidencia sin distinguir mayúsculas ni tildes
+  const norm = (s) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const t = norm(tipo);
+  for (const [key, value] of Object.entries(precios)) {
+    if (norm(key) === t) return value;
+  }
+
+  // 3) Matching por palabras clave (inglés/español)
+  for (const [key, value] of Object.entries(precios)) {
+    const k = norm(key);
+    const hasBalcon = t.includes('balcon') || t.includes('balcony');
+    const hasInterior = t.includes('interior') || t.includes('inside');
+    const hasVista = t.includes('vista') || t.includes('ocean') || t.includes('mar') || t.includes('sea') || t.includes('view');
+    if (hasBalcon && (k.includes('balcon') || k.includes('balcony'))) return value;
+    if (hasInterior && k.includes('interior')) return value;
+    if (hasVista && (k.includes('vista') || k.includes('ocean') || k.includes('mar'))) return value;
+  }
+
+  // 4) Contiene parcial en cualquier dirección
+  for (const [key, value] of Object.entries(precios)) {
+    const k = norm(key);
+    if (k.includes(t) || t.includes(k)) return value;
+  }
+
+  return null;
+}
+
+/**
  * Calculate a custom plan with pricing breakdown.
  * Uses planPricing from bot settings. If not configured, returns null.
  */
@@ -17,8 +55,8 @@ async function calcularPlan({ numPersonas, numAdultos, numMenores, tipo }, botId
   const precios = settings.planPricing;
   if (!precios) return null; // sin datos → no se puede calcular
 
-  // usar el tipo indicado, o el primero disponible si no se especifica
-  const p = tipo ? precios[tipo] : Object.values(precios)[0];
+  // usar el tipo indicado (con matching tolerante), o el primero disponible
+  const p = findPricing(precios, tipo);
   if (!p) return null;
   let total = 0;
   let cabinas = [];
