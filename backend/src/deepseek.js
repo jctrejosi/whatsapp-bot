@@ -143,6 +143,7 @@ async function callDeepSeek(messages, tools = null, attempt = 1, botId) {
     let currentMessages = messages;
     let escalate = null;
     let emailSent = false;
+    const allToolResults = []; // para que el juez verifique contra datos de funciones
 
     while (currentMsg.tool_calls && currentMsg.tool_calls.length > 0) {
       console.log(`Function call: ${currentMsg.tool_calls.map(t => t.function.name).join(', ')}`);
@@ -157,16 +158,12 @@ async function callDeepSeek(messages, tools = null, attempt = 1, botId) {
           console.log(`  → ${toolCall.function.name}(${JSON.stringify(args)}) = ${JSON.stringify(result).substring(0, 120)}`);
           if (toolCall.function.name === 'enviar_correo_informacion' && result?.ok) emailSent = true;
           if (result?._escalate && !escalate) escalate = result.lead || {};
-          toolResults.push({
-            role: 'tool',
-            tool_call_id: toolCall.id,
-            // Si la función devuelve null (sin datos configurados), indicar al modelo
-            // que busque en el contexto (RAG) — así no se rinde y usa los chunks.
-            content: JSON.stringify(result ?? {
-              ok: false,
-              mensaje: 'Datos no configurados. Extrae la información del contexto disponible.',
-            }),
+          const toolContent = JSON.stringify(result ?? {
+            ok: false,
+            mensaje: 'Datos no configurados. Extrae la información del contexto disponible.',
           });
+          toolResults.push({ role: 'tool', tool_call_id: toolCall.id, content: toolContent });
+          allToolResults.push({ name: toolCall.function.name, content: toolContent });
         }
       }
 
@@ -193,6 +190,7 @@ async function callDeepSeek(messages, tools = null, attempt = 1, botId) {
       currentMsg._escalateData = escalate;
     }
     if (emailSent) currentMsg._emailSent = true;
+    if (allToolResults.length > 0) currentMsg._toolResults = allToolResults;
     return currentMsg;
   }
 
@@ -204,11 +202,15 @@ async function callDeepSeek(messages, tools = null, attempt = 1, botId) {
  * Usa DeepSeek como juez (LLM-as-judge): evalúa el SIGNIFICADO, no las palabras
  * exactas, así que funciona con respuesta en español y chunks en inglés.
  *
+ * toolResults: resultados de funciones del sistema (p.ej. calcular_presupuesto).
+ * Los datos devueltos por las funciones se consideran verificados por el sistema,
+ * así que el juez no los marca como inventados (ej. totales calculados).
+ *
  * Fallback: si la llamada falla, usa una verificación exacta de precios/números.
  *
  * @returns {Promise<boolean>} true si hay datos no respaldados (bloquear respuesta).
  */
-async function hasUnsupportedData(content, chunks) {
+async function hasUnsupportedData(content, chunks, toolResults = []) {
   if (!content || !chunks || chunks.length === 0) return false;
 
   try {
@@ -216,9 +218,18 @@ async function hasUnsupportedData(content, chunks) {
       .map((c, i) => `[${i + 1}] ${(c.content || '').substring(0, 400).replace(/\n/g, ' ')}`)
       .join('\n---\n');
 
-    const prompt = `Eres un verificador de hechos riguroso. Determina si la respuesta del asistente contiene DATOS CONCRETOS inventados (precios, fechas, números, condiciones, nombres, características) que NO estén respaldados por los fragmentos de conocimiento.
+    // Datos verificados por el sistema (salida de funciones como calcular_presupuesto)
+    const verifiedData = toolResults
+      .filter((t) => t && t.content && !t.content.includes('"ok":false'))
+      .map((t, i) => `[Herramienta ${i + 1} (${t.name})]: ${String(t.content).substring(0, 600).replace(/\n/g, ' ')}`)
+      .join('\n---\n');
 
-IMPORTANTE: Los fragmentos pueden estar en INGLÉS y la respuesta en ESPAÑOL. Evalúa el SIGNIFICADO de los datos, no las palabras exactas ni el idioma. Un dato es válido si su significado aparece en los fragmentos.
+    const prompt = `Eres un verificador de hechos riguroso. Determina si la respuesta del asistente contiene DATOS CONCRETOS inventados (precios, fechas, números, condiciones, nombres, características) que NO estén respaldados por los fragmentos de conocimiento NI por los datos verificados del sistema.
+
+IMPORTANTE:
+- Los fragmentos pueden estar en INGLÉS y la respuesta en ESPAÑOL. Evalúa el SIGNIFICADO, no las palabras exactas ni el idioma.
+- Los datos provenientes de las herramientas del sistema (cálculos de presupuesto, cronogramas, etc.) se consideran VERIFICADOS y válidos.
+- Los totales calculados a partir de precios base (por ejemplo, total = precio por persona × personas) son válidos.
 
 RESPUESTA DEL ASISTENTE:
 """${content.substring(0, 3000)}"""
@@ -226,7 +237,9 @@ RESPUESTA DEL ASISTENTE:
 FRAGMENTOS DE CONOCIMIENTO:
 ${context}
 
-Responde ÚNICAMENTE con una palabra: "SI" si la respuesta inventa datos concretos no respaldados, o "NO" si toda la información está respaldada por los fragmentos.`;
+${verifiedData ? `\nDATOS VERIFICADOS DEL SISTEMA (de funciones):\n${verifiedData}` : ''}
+
+Responde ÚNICAMENTE con una palabra: "SI" si la respuesta inventa datos concretos no respaldados, o "NO" si toda la información está respaldada por los fragmentos o los datos verificados.`;
 
     const { data } = await axios.post(
       'https://api.deepseek.com/chat/completions',
@@ -429,7 +442,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     // detecta alucinaciones sin fallar por diferencia de idioma entre la respuesta
     // y los chunks (p.ej. "20 de marzo" vs "MARCH 20").
     if (relevantChunks.length > 0 && content && !escalated) {
-      const fabricated = await hasUnsupportedData(content, relevantChunks);
+      const fabricated = await hasUnsupportedData(content, relevantChunks, msg._toolResults || []);
       if (fabricated) {
         console.log('  🛑 Cross-ref BLOCKED: respuesta con datos no respaldados');
         content = 'Lo siento, no encontré suficiente información para responder con precisión. ¿Quieres que contacte a un asesor?';
