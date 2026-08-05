@@ -192,13 +192,17 @@ async def _safe_ingest(job_id: str):
     except Exception as exc:
         print(f"Ingestion job {job_id} failed: {exc}")
     finally:
-        # Clean up temp file and clear the path from the source record
-        if tmp_path and os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-                print(f"Temp file cleaned: {tmp_path}")
-            except OSError:
-                pass
+        # Solo borrar el archivo local si ya está respaldado en Cloudinary
+        if tmp_path:
+            cloud_url = await pool.fetchval(
+                "SELECT cloudinary_url FROM knowledge_sources WHERE file_path = $1", tmp_path
+            )
+            if cloud_url and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                    print(f"Local file cleaned (backed up in Cloudinary): {tmp_path}")
+                except OSError:
+                    pass
 
 
 @app.get("/sources")
