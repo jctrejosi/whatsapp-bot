@@ -193,6 +193,69 @@ async function callDeepSeek(messages, tools = null, attempt = 1, botId) {
 }
 
 /**
+ * Verifica si la respuesta contiene datos inventados no respaldados por los chunks.
+ * Usa DeepSeek como juez (LLM-as-judge): evalúa el SIGNIFICADO, no las palabras
+ * exactas, así que funciona con respuesta en español y chunks en inglés.
+ *
+ * Fallback: si la llamada falla, usa una verificación exacta de precios/números.
+ *
+ * @returns {Promise<boolean>} true si hay datos no respaldados (bloquear respuesta).
+ */
+async function hasUnsupportedData(content, chunks) {
+  if (!content || !chunks || chunks.length === 0) return false;
+
+  try {
+    const context = chunks
+      .map((c, i) => `[${i + 1}] ${(c.content || '').substring(0, 400).replace(/\n/g, ' ')}`)
+      .join('\n---\n');
+
+    const prompt = `Eres un verificador de hechos riguroso. Determina si la respuesta del asistente contiene DATOS CONCRETOS inventados (precios, fechas, números, condiciones, nombres, características) que NO estén respaldados por los fragmentos de conocimiento.
+
+IMPORTANTE: Los fragmentos pueden estar en INGLÉS y la respuesta en ESPAÑOL. Evalúa el SIGNIFICADO de los datos, no las palabras exactas ni el idioma. Un dato es válido si su significado aparece en los fragmentos.
+
+RESPUESTA DEL ASISTENTE:
+"""${content.substring(0, 3000)}"""
+
+FRAGMENTOS DE CONOCIMIENTO:
+${context}
+
+Responde ÚNICAMENTE con una palabra: "SI" si la respuesta inventa datos concretos no respaldados, o "NO" si toda la información está respaldada por los fragmentos.`;
+
+    const { data } = await axios.post(
+      'https://api.deepseek.com/chat/completions',
+      {
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: 'Eres un verificador de hechos. Responde únicamente SI o NO.' },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0,
+        max_tokens: 10,
+      },
+      { headers: DEEPSEEK_HEADERS, timeout: 20000 }
+    );
+
+    const answer = (data.choices[0].message.content || '').trim().toUpperCase();
+    console.log(`  🔍 LLM cross-ref: respuesta del juez = ${answer}`);
+    return answer.includes('SI');
+  } catch (err) {
+    // Fallback: verificación exacta de precios/números (independiente del idioma)
+    console.warn('  🔍 LLM cross-ref fallback a precios/números:', err.message);
+    const allChunksText = chunks.map(c => (c.content || '')).join(' ').toLowerCase().replace(/,/g, '');
+    const dataPoints = [];
+    (content.match(/\$[\d,.]+/g) || []).forEach(d => dataPoints.push(d));
+    (content.match(/\b\d{3,}\b/g) || []).forEach(d => {
+      if (!/^(20[2-9]\d|1[0-9]{3}|\d{4})$/.test(d)) dataPoints.push(d);
+    });
+    let missing = 0;
+    for (const dp of dataPoints) {
+      if (!allChunksText.includes(dp.toLowerCase().replace(/,/g, ''))) missing++;
+    }
+    return dataPoints.length >= 2 && missing / dataPoints.length > 0.3;
+  }
+}
+
+/**
  * Send a message to DeepSeek V4 Flash with function calling and RAG.
  * @returns {Promise<{ answer: string, chunks: Array, escalated: boolean }>}
  */
@@ -354,44 +417,14 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
       }
     }
 
-    // ═══ Cross-reference: si hay chunks, verificar que los datos de la
-    //      respuesta existan realmente en el conocimiento ═══
+    // ═══ Cross-reference: verificar que la respuesta no invente datos ═══
+    // Usa DeepSeek como juez (LLM-as-judge): entiende español e inglés, así que
+    // detecta alucinaciones sin fallar por diferencia de idioma entre la respuesta
+    // y los chunks (p.ej. "20 de marzo" vs "MARCH 20").
     if (relevantChunks.length > 0 && content && !escalated) {
-      const allChunksText = relevantChunks.map(c => c.content).join(' ').toLowerCase();
-
-      // Extraer solo datos independientes del idioma (precios y números).
-      // Fechas en palabras y nombres propios NO se comparan: la respuesta puede
-      // estar en español mientras los chunks están en inglés (p.ej. "20 de marzo"
-      // vs "MARCH 20"), lo que haría fallar la verificación siempre.
-      const dataPoints = [];
-
-      // Precios: $1,736.26, $200 USD, etc.
-      (content.match(/\$[\d,.]+/g) || []).forEach(d => dataPoints.push(d));
-
-      // Números significativos (3+ dígitos, no años sueltos)
-      (content.match(/\b\d{3,}\b/g) || []).forEach(d => {
-        // Ignorar años (2024-2030) y horas (1000-2400)
-        if (!/^(20[2-9]\d|1[0-9]{3}|\d{4})$/.test(d)) dataPoints.push(d);
-      });
-
-      // Normalizar comas (el modelo escribe $2,166.26 pero el PDF tiene $2166.26)
-      const normalizedChunks = allChunksText.replace(/,/g, '');
-      
-      // Verificar cuántos NO están en los chunks
-      let missingCount = 0;
-      for (const dp of dataPoints) {
-        const norm = dp.toLowerCase().replace(/,/g, '');
-        if (!normalizedChunks.includes(norm)) missingCount++;
-      }
-
-      if (dataPoints.length > 0 && missingCount > 0) {
-        console.log(`  🔍 Cross-ref: ${missingCount}/${dataPoints.length} data points not in chunks`);
-      }
-
-      // Bloquear si más de 30% de los datos no están en los chunks
-      // (tolerancia: los datos pueden aparecer ligeramente formateados distinto)
-      if (dataPoints.length >= 2 && missingCount / dataPoints.length > 0.3) {
-        console.log(`  🛑 Cross-ref BLOCKED: ${missingCount}/${dataPoints.length} data points not found`);
+      const fabricated = await hasUnsupportedData(content, relevantChunks);
+      if (fabricated) {
+        console.log('  🛑 Cross-ref BLOCKED: respuesta con datos no respaldados');
         content = 'Lo siento, no encontré suficiente información para responder con precisión. ¿Quieres que contacte a un asesor?';
       }
     }
