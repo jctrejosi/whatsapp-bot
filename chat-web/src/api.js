@@ -1,5 +1,22 @@
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
+// Session id persistente por pestaña (sessionStorage).
+// Cada usuario (navegador/pestaña) tiene su propio historial aislado en el backend.
+// Sobrevive a recargas pero no se comparte entre pestañas/usuarios.
+const SESSION_ID = (() => {
+  const key = 'chat_session_id';
+  try {
+    let id = sessionStorage.getItem(key);
+    if (!id) {
+      id = 'web_' + crypto.randomUUID();
+      sessionStorage.setItem(key, id);
+    }
+    return id;
+  } catch {
+    return 'web_' + crypto.randomUUID();
+  }
+})();
+
 async function handleResponse(res, fallback) {
   if (res.ok) return res.json();
   let msg = fallback;
@@ -15,7 +32,7 @@ export async function chat(query) {
   const res = await fetch(`${API_URL}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, user_id: 'web', user_name: 'Admin' }),
+    body: JSON.stringify({ query, user_id: SESSION_ID, user_name: 'Admin' }),
   });
   return handleResponse(res, `Error ${res.status} al enviar mensaje`);
 }
@@ -112,7 +129,7 @@ export async function sendBotTestEmail(id) {
 }
 
 export async function botChat(id, query) {
-  const res = await fetch(`${API_URL}/bots/${id}/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, user_id: 'web', user_name: 'Admin' }) });
+  const res = await fetch(`${API_URL}/bots/${id}/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, user_id: SESSION_ID, user_name: 'Admin' }) });
   return handleResponse(res, `Error ${res.status} al enviar mensaje`);
 }
 
