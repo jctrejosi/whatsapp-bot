@@ -29,7 +29,7 @@ function envDefaults() {
     temperature: 0.7,
     model: process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash',
     maxTokens: parseInt(process.env.MAX_TOKENS || '2000', 10),
-    topK: 3,
+    topK: 5,
     maxHistoryMessages: parseInt(process.env.MAX_HISTORY_MESSAGES || '6', 10),
     useReranker: true,
     systemPrompt: '',
