@@ -98,7 +98,14 @@ Devuelve ÚNICAMENTE un array JSON con los índices de los fragmentos ordenados 
                 c["rerank_position"] = rank + 1
                 reranked.append(c)
 
-        # Return top_k
+        # If reranker returned empty order (query unrelated to all chunks), fall back
+        if not reranked:
+            print("Reranker returned empty order, falling back to original order")
+            for i, c in enumerate(chunks[:top_k]):
+                c["rerank_score"] = None
+                c["rerank_position"] = i + 1
+            return chunks[:top_k]
+
         return reranked[:top_k]
 
     except Exception as exc:
