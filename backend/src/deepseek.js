@@ -385,10 +385,14 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
         }
       });
 
+      // Normalizar comas (el modelo escribe $2,166.26 pero el PDF tiene $2166.26)
+      const normalizedChunks = allChunksText.replace(/,/g, '');
+      
       // Verificar cuántos NO están en los chunks
       let missingCount = 0;
       for (const dp of dataPoints) {
-        if (!allChunksText.includes(dp.toLowerCase())) missingCount++;
+        const norm = dp.toLowerCase().replace(/,/g, '');
+        if (!normalizedChunks.includes(norm)) missingCount++;
       }
 
       if (dataPoints.length > 0 && missingCount > 0) {
