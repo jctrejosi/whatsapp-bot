@@ -15,7 +15,7 @@ pgvector==0.5.0
 
 # HTTP client (DeepSeek API + model downloads)
 httpx==0.28.1
-requests==2.32.3
+requests==2.33.0
 
 # Config
 python-dotenv==1.2.2
