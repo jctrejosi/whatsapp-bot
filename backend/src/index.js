@@ -287,38 +287,53 @@ app.get('/bots/:id/knowledge', async (req, res) => {
 });
 
 app.post('/bots/:id/knowledge/upload', async (req, res) => {
-  try {
-    const multer = require('multer');
-    const upload = multer({ storage: multer.memoryStorage() }).single('file');
-    upload(req, res, async (err) => {
-      if (err) return res.status(400).json({ error: err.message });
-      if (!req.file) return res.status(400).json({ error: 'file is required' });
+  const multer = require('multer');
+  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } }).single('file');
 
-      // 1. Subir a Cloudinary
+  // Envolver multer en una promesa para manejar errores correctamente
+  const processUpload = () => new Promise((resolve, reject) => {
+    upload(req, res, (err) => {
+      if (err) return reject(err);
+      if (!req.file) return reject(new Error('file is required'));
+      resolve();
+    });
+  });
+
+  try {
+    await processUpload();
+
+    // 1. Subir a Cloudinary (no bloqueante — si falla, seguimos con el disco local)
+    let cloudinaryUrl = null;
+    try {
       const { uploadBuffer } = require('./cloudinary');
       const cloudResult = await uploadBuffer(req.file.buffer, {
         folder: `bots/${req.params.id}`,
         original_filename: req.file.originalname,
       });
+      cloudinaryUrl = cloudResult.url;
+    } catch (cloudErr) {
+      console.warn('Cloudinary upload failed (continuing without it):', cloudErr.message);
+    }
 
-      // 2. Enviar al knowledge-service para extracción + chunking + embeddings
-      const FormData = require('form-data');
-      const form = new FormData();
-      form.append('file', req.file.buffer, { filename: req.file.originalname, contentType: req.file.mimetype });
-      if (req.params.id) form.append('bot_id', req.params.id);
-      if (cloudResult.url) form.append('cloudinary_url', cloudResult.url);
-      const { data } = await axios.post(`${KNOWLEDGE_URL}/ingest`, form, {
-        headers: { ...form.getHeaders() },
-        maxBodyLength: Infinity,
-        maxContentLength: Infinity,
-      });
-
-      res.json({ ...data, cloudinary_url: cloudResult.url });
+    // 2. Enviar al knowledge-service para extracción + chunking + embeddings
+    const FormData = require('form-data');
+    const form = new FormData();
+    form.append('file', req.file.buffer, { filename: req.file.originalname, contentType: req.file.mimetype });
+    if (req.params.id) form.append('bot_id', req.params.id);
+    if (cloudinaryUrl) form.append('cloudinary_url', cloudinaryUrl);
+    const { data } = await axios.post(`${KNOWLEDGE_URL}/ingest`, form, {
+      headers: { ...form.getHeaders() },
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
     });
-  } catch (e) { res.status(502).json({ error: knowledgeError('/ingest') }); }
-});
 
-app.delete('/bots/:id/knowledge/:sourceId', async (req, res) => {
+    res.json({ ...data, cloudinary_url: cloudinaryUrl });
+  } catch (e) {
+    console.error('Upload error:', e.response?.data || e.message);
+    const upstream = e.response?.data?.detail || e.message;
+    res.status(502).json({ error: upstream || knowledgeError('/ingest') });
+  }
+});('/bots/:id/knowledge/:sourceId', async (req, res) => {
   try {
     await knowledge.delete(`/sources/${req.params.sourceId}`);
     res.json({ ok: true });
