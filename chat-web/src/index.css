@@ -638,6 +638,7 @@ body {
   color: var(--gray-200);
   align-self: center;
   white-space: nowrap;
+  min-width: 70px;
 }
 
 .email-add input,

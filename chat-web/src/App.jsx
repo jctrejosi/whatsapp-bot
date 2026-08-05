@@ -365,6 +365,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
   // Knowledge tab
   const [sources, setSources] = useState([]);
   const [uploading, setUploading] = useState(false);
+  const [deletingSource, setDeletingSource] = useState(null);
   // DeepSeek models
   const [models, setModels] = useState([]);
   const [modelsLoading, setModelsLoading] = useState(false);
@@ -432,12 +433,21 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
     }
   };
 
-  const handleDeleteSource = async (sourceId) => {
-    if (!botId || !window.confirm('¿Eliminar esta fuente de conocimiento?')) return;
+  const handleDeleteSource = (sourceId) => {
+    if (!botId) return;
+    setDeletingSource(sourceId);
+  };
+
+  const confirmDeleteSource = async () => {
+    if (!botId || !deletingSource) return;
     try {
-      await deleteBotSource(botId, sourceId);
-      setSources((prev) => prev.filter((s) => s.id !== sourceId));
-    } catch (e) { alert('Error: ' + e.message); }
+      await deleteBotSource(botId, deletingSource);
+      setSources((prev) => prev.filter((s) => s.id !== deletingSource));
+      setDeletingSource(null);
+    } catch (e) {
+      setMsg('❌ ' + e.message);
+      setDeletingSource(null);
+    }
   };
 
   const save = async () => {
@@ -784,6 +794,45 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
           {msg && <span className="settings-status">{msg}</span>}
         </div>
       </div>
+
+      {/* Modal: confirmar eliminación de archivo */}
+      {deletingSource && (
+        <div className="modal-overlay" style={{ zIndex: 200 }} onClick={() => setDeletingSource(null)}>
+          <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>🗑️ Eliminar archivo</h2>
+              <button className="btn btn-secondary btn-sm" onClick={() => setDeletingSource(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ fontSize: 13, color: 'var(--gray-200)', marginBottom: 10 }}>
+                ¿Seguro que quieres eliminar{' '}
+                <strong style={{ color: 'var(--gold-light)' }}>
+                  {sources.find((s) => s.id === deletingSource)?.title ||
+                   sources.find((s) => s.id === deletingSource)?.original_filename ||
+                   'este archivo'}
+                </strong>
+                ?
+              </p>
+              <p style={{ fontSize: 12, color: 'var(--gray-200)' }}>
+                Se borrará el archivo, sus fragmentos, embeddings y el registro de ingesta.
+                Esta acción no se puede deshacer.
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn btn-primary"
+                style={{ background: 'var(--coral)' }}
+                onClick={confirmDeleteSource}
+              >
+                Eliminar
+              </button>
+              <button className="btn btn-secondary" onClick={() => setDeletingSource(null)}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
