@@ -170,19 +170,61 @@ async function enviarCorreo({ email, informacion, asunto }, botId) {
   return { ok: false, error: result.error, mensaje: `No se pudo enviar el correo: ${result.error || 'error desconocido'}. Indícale al cliente que el envío falló.` };
 }
 
+/**
+ * Notify the advisor team that the client wants to speak with a person.
+ */
+async function notificarAsesor({ nombre, telefono, email, consulta, motivo }, botId) {
+  const { sendEscalationEmail } = require('./escalation');
+  const displayName = nombre || 'Cliente';
+  const contact = telefono || email || 'No proporcionado';
+  try {
+    const result = await sendEscalationEmail({
+      userId: telefono || email || 'anonimo',
+      userName: displayName,
+      query: consulta || motivo || 'Solicitud de contacto con asesor',
+      reason: motivo || 'El cliente desea hablar con un asesor',
+      type: 'advisor',
+      botId,
+    });
+    if (result.ok) {
+      return { ok: true, mensaje: `Aviso enviado al equipo. Un asesor se pondrá en contacto contigo pronto.` };
+    }
+    return { ok: false, error: result.error, mensaje: `No se pudo notificar al equipo: ${result.error || 'error desconocido'}` };
+  } catch (e) {
+    return { ok: false, error: e.message, mensaje: 'Error al intentar contactar al equipo.' };
+  }
+}
+
 // ─── Function definitions for DeepSeek tool calling ──────────────────────
 
 const TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'enviar_correo_informacion',
-      description: 'Envía por correo electrónico la información que el cliente solicitó (precios, detalles, itinerario, documentos, etc.). Debe llamarse cuando el cliente pide que le envíen información por email. IMPORTANTE: antes de llamarla, el cliente debe dar su correo electrónico; si no lo tienes, pídelo primero.',
+      name: 'comunicar_asesor',
+      description: 'El cliente quiere hablar con una persona real (asesor, agente, equipo de ventas). Usa esta función cuando el cliente DIGA EXPLÍCITAMENTE que quiere hablar con alguien, ser contactado, o recibir atención personalizada. IMPORTANTE: pide al cliente su nombre y teléfono o correo ANTES de llamar esta función. Si ya te los dio, procede.',
       parameters: {
         type: 'object',
         properties: {
-          email:    { type: 'string', description: 'Correo electrónico del cliente al que se enviará la información.' },
-          informacion: { type: 'string', description: 'Contenido de la información solicitada por el cliente.' },
+          nombre:   { type: 'string', description: 'Nombre del cliente.' },
+          telefono: { type: 'string', description: 'Teléfono de contacto.' },
+          email:    { type: 'string', description: 'Correo electrónico.' },
+          consulta: { type: 'string', description: 'Lo que el cliente quiere consultar con el asesor.' },
+          motivo:   { type: 'string', description: 'Razón breve de la solicitud.' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'enviar_correo_informacion',
+      description: 'Envía por correo electrónico la información que el cliente solicitó. Debe llamarse cuando el cliente pide que le envíen información por email. IMPORTANTE: antes de llamarla, el cliente debe dar su correo electrónico; si no lo tienes, pídelo primero.',
+      parameters: {
+        type: 'object',
+        properties: {
+          email:    { type: 'string', description: 'Correo electrónico del cliente.' },
+          informacion: { type: 'string', description: 'Contenido de la información solicitada.' },
           asunto:   { type: 'string', description: 'Asunto breve y descriptivo del correo.' },
         },
         required: ['email'],
@@ -193,7 +235,7 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'iniciar_cierre_venta',
-      description: 'Usa esta función cuando el cliente está listo para comprar o reservar. IMPORTANTE: antes de llamarla, pídele al cliente sus datos de contacto (nombre y teléfono o correo). Si ya te los dio, procede. También pregunta cuántas personas serán y qué opción prefiere.',
+      description: 'Usa esta función cuando el cliente está listo para comprar o reservar. IMPORTANTE: antes de llamarla, pídele al cliente sus datos de contacto (nombre y teléfono o correo). También pregunta cuántas personas serán y qué opción prefiere.',
       parameters: {
         type: 'object',
         properties: {
@@ -208,25 +250,96 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'listar_caracteristicas',
+      description: 'Devuelve la lista de lo que incluye el producto, servicio o paquete. Usar cuando el cliente pregunta qué incluye, qué trae, o qué ofrece.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'obtener_cronograma',
+      description: 'Devuelve el cronograma completo (día por día, o paso a paso) del evento, viaje o servicio. Usar cuando el cliente pregunta por el itinerario, horario, o agenda.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'obtener_fechas_pago',
+      description: 'Devuelve las fechas de depósitos, pagos programados y política de cancelación del producto o servicio.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calcular_presupuesto',
+      description: 'Calcula el costo total y la distribución entre opciones según número de personas y tipo seleccionado. Usar cuando el cliente pide precios, cotizaciones o presupuestos para un grupo.',
+      parameters: {
+        type: 'object',
+        properties: {
+          numPersonas:  { type: 'integer', description: 'Número total de personas del grupo' },
+          numAdultos:   { type: 'integer', description: 'Número de adultos' },
+          numMenores:   { type: 'integer', description: 'Número de menores' },
+          tipoCabina:   { type: 'string', description: 'Tipo de opción seleccionada (según el catálogo del negocio).' },
+        },
+        required: ['numPersonas', 'numAdultos', 'numMenores'],
+      },
+    },
+  },
 ];
 
 const FUNCTION_MAP = {
+  comunicar_asesor: notificarAsesor,
   enviar_correo_informacion: enviarCorreo,
   iniciar_cierre_venta: iniciarCierreVenta,
+  listar_caracteristicas: obtenerQueIncluye,
+  obtener_cronograma: obtenerItinerario,
+  obtener_fechas_pago: obtenerFechasPago,
+  calcular_presupuesto: calcularPlan,
 };
 
 // ─── Catálogo de funciones (para configuración por bot) ───────────────────
 
 const FUNCTION_CATALOG = [
   {
+    name: 'comunicar_asesor',
+    label: '📞 Comunicar con un asesor',
+    description: 'Notifica al equipo cuando el cliente pide hablar con una persona real (no es cierre de venta).',
+  },
+  {
     name: 'enviar_correo_informacion',
     label: '📧 Enviar información por correo',
-    description: 'Envía al cliente la información que solicite (precios, detalles, documentos, etc.) a su correo electrónico.',
+    description: 'Envía al cliente la información que solicite a su correo electrónico.',
   },
   {
     name: 'iniciar_cierre_venta',
     label: '🤝 Cierre de venta',
-    description: 'Registra los datos del cliente listo para comprar y notifica al asesor o equipo de ventas.',
+    description: 'Registra los datos del cliente listo para comprar y notifica al equipo de ventas.',
+  },
+  {
+    name: 'listar_caracteristicas',
+    label: '📋 Listar lo que incluye',
+    description: 'Devuelve la lista de lo que incluye el producto, servicio o paquete (configurable por bot).',
+  },
+  {
+    name: 'obtener_cronograma',
+    label: '🗓️ Cronograma / Itinerario',
+    description: 'Devuelve el cronograma del evento o servicio, día por día o paso a paso (configurable por bot).',
+  },
+  {
+    name: 'obtener_fechas_pago',
+    label: '📅 Fechas de pago',
+    description: 'Devuelve los depósitos, pagos y política de cancelación (configurable por bot).',
+  },
+  {
+    name: 'calcular_presupuesto',
+    label: '💰 Calcular presupuesto',
+    description: 'Calcula el costo y distribución de opciones según personas y tipo (configurable por bot).',
   },
 ];
 
