@@ -145,8 +145,8 @@ async function callDeepSeek(messages, tools = null, attempt = 1, botId) {
           const args = JSON.parse(toolCall.function.arguments || '{}');
           const result = await fn(args, botId); // await soporta funciones async (ej. enviar_correo_informacion)
           console.log(`  → ${toolCall.function.name}(${JSON.stringify(args)}) = ${JSON.stringify(result).substring(0, 120)}`);
-          if (toolCall.function.name === 'enviar_correo_informacion' && result.ok) emailSent = true;
-          if (result._escalate && !escalate) escalate = result.lead || {};
+          if (toolCall.function.name === 'enviar_correo_informacion' && result?.ok) emailSent = true;
+          if (result?._escalate && !escalate) escalate = result.lead || {};
           toolResults.push({
             role: 'tool',
             tool_call_id: toolCall.id,

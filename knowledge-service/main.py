@@ -163,16 +163,20 @@ async def ingest_file(file: UploadFile = File(...), bot_id: str = Form(None), cl
             job_id, source_id,
         )
 
-    # Run ingestion pipeline (don't await — it runs in background via FastAPI BackgroundTasks)
-    import asyncio as _asyncio
-    _asyncio.create_task(_safe_ingest(job_id))
+    # Run ingestion pipeline synchronously (espera a que termine antes de responder)
+    await _safe_ingest(job_id)
+
+    # Fetch final source status
+    async with pool.acquire() as conn:
+        source_row = await conn.fetchrow("SELECT status, error_message FROM knowledge_sources WHERE id = $1", source_id)
 
     return {
         "source_id": str(source_id),
         "job_id": str(job_id),
         "filename": file.filename,
-        "status": "processing",
-        "message": "Ingestion started. Check GET /sources/{source_id} for status.",
+        "status": source_row["status"] if source_row else "error",
+        "error_message": source_row["error_message"] if source_row else None,
+        "message": "Ingestion complete.",
     }
 
 

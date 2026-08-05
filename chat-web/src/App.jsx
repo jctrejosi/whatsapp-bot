@@ -491,14 +491,13 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
 
     if (!currentBotId) return;
     setUploading(true);
-    setMsg('');
+    setMsg('⏳ Subiendo archivo...');
     try {
       await uploadBotFile(currentBotId, file);
-      setMsg('✅ Archivo subido. Procesando...');
-      setTimeout(async () => {
-        try { setSources(await getBotKnowledge(currentBotId)); } catch {}
-        setMsg('');
-      }, 3000);
+      setMsg('⏳ Extrayendo conocimiento...');
+      // La API espera a que termine el procesamiento antes de responder
+      setSources(await getBotKnowledge(currentBotId));
+      setMsg('✅ Archivo procesado. El conocimiento ya está disponible.');
     } catch (err) {
       setMsg('❌ ' + err.message);
     } finally {
