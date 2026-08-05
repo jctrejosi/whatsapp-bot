@@ -244,7 +244,8 @@ async function callDeepSeek(messages, tools = null, attempt = 1, botId) {
           toolResults.push({
             role: 'tool',
             tool_call_id: toolCall.id,
-            content: JSON.stringify(result),
+            // Si la función devuelve null (sin datos configurados), enviar un JSON válido
+            content: JSON.stringify(result ?? { ok: false, error: 'No hay datos configurados para esta función' }),
           });
         }
       }
@@ -441,7 +442,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
       content = await translateToSpanish(content);
     }
 
-n    // ═══ HARD validation: si no hay chunks en la BD, el modelo NO puede
+    // ═══ HARD validation: si no hay chunks en la BD, el modelo NO puede
     //      responder con información que no venga de una función ═══
     if (relevantChunks.length === 0 && content && !escalated && !emailSent) {
       const looksLikeKnowledge = (

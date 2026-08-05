@@ -107,57 +107,106 @@ const axios = require('axios');
 
 const KNOWLEDGE_URL = process.env.KNOWLEDGE_SERVICE_URL || 'http://localhost:8000';
 
-// ─── Proxy to knowledge-service ────────────────────────────────────────
-const knowledge = axios.create({ baseURL: KNOWLEDGE_URL });
+// ─── Resilient proxy to knowledge-service ─────────────────────────────
+const knowledge = axios.create({ baseURL: KNOWLEDGE_URL, timeout: 15000 });
 
-// Mensaje de error con la URL intentada, para diagnóstico rápido
+// Circuit breaker: track consecutive failures
+let knowledgeFailures = 0;
+let knowledgeCircuitOpen = false;
+let circuitOpenSince = 0;
+const CIRCUIT_TIMEOUT_MS = 30000; // 30s antes de reintentar
+const CIRCUIT_THRESHOLD = 3;       // abrir tras 3 fallos seguidos
+
+function knowledgeError(url) {
+  return `Knowledge service unreachable (${KNOWLEDGE_URL}${url})`;
+}
+
+/** Wrapper con retry + circuit breaker para llamadas al knowledge-service. */
+async function knowledgeProxy(method, url, options = {}) {
+  if (knowledgeCircuitOpen) {
+    if (Date.now() - circuitOpenSince > CIRCUIT_TIMEOUT_MS) {
+      // Reintentar tras timeout
+      console.log('  🔄 Circuit breaker: retrying knowledge-service...');
+      knowledgeCircuitOpen = false;
+      knowledgeFailures = 0;
+    } else {
+      throw new Error('CIRCUIT_OPEN');
+    }
+  }
+
+  const maxRetries = options.skipRetry ? 1 : 2;
+  let lastError;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await knowledge({ method, url, ...options, timeout: options.timeout || 15000 });
+      knowledgeFailures = 0; // reset en éxito
+      return res.data;
+    } catch (e) {
+      lastError = e;
+      knowledgeFailures++;
+      if (knowledgeFailures >= CIRCUIT_THRESHOLD && !knowledgeCircuitOpen) {
+        knowledgeCircuitOpen = true;
+        circuitOpenSince = Date.now();
+        console.log(`  ⚡ Circuit breaker OPEN (${knowledgeFailures} failures). Pausing for ${CIRCUIT_TIMEOUT_MS / 1000}s`);
+      }
+      if (attempt < maxRetries) {
+        console.log(`  🔄 Retry ${attempt}/${maxRetries} for ${method} ${url}: ${e.code || e.message}`);
+        await new Promise(r => setTimeout(r, 500 * attempt)); // backoff
+      }
+    }
+  }
+  throw lastError;
+}
+
+// Mensaje de error con la URL intentada, para diagnóstico rápido (legacy)
 function knowledgeError(url) {
   return `Knowledge service unreachable (${KNOWLEDGE_URL}${url})`;
 }
 
 app.get('/sources', async (req, res) => {
   try {
-    console.log(`Proxy → ${KNOWLEDGE_URL}/sources`);
-    const { data } = await knowledge.get('/sources');
+    const data = await knowledgeProxy('get', '/sources');
     res.json(data);
   } catch (e) {
-    console.error(`Proxy /sources FAILED: ${e.code || e.message}`);
     res.status(502).json({ error: knowledgeError('/sources') });
   }
 });
 
 app.get('/sources/:id', async (req, res) => {
   try {
-    const { data } = await knowledge.get(`/sources/${req.params.id}`);
+    const data = await knowledgeProxy('get', `/sources/${req.params.id}`);
     res.json(data);
   } catch (e) { res.status(502).json({ error: knowledgeError(`/sources/${req.params.id}`) }); }
 });
 
 app.post('/ingest', async (req, res) => {
   try {
-    const { data } = await knowledge.post('/ingest', req.body);
+    const data = await knowledgeProxy('post', '/ingest', { data: req.body });
     res.json(data);
   } catch (e) { res.status(502).json({ error: knowledgeError('/ingest') }); }
 });
 
+// Health check: no depende del knowledge-service (evita 502 si knowledge está caído)
 app.get('/health', async (req, res) => {
+  let knowledgeStatus = 'unknown';
   try {
-    console.log(`Proxy → ${KNOWLEDGE_URL}/health`);
-    const { data } = await knowledge.get('/health');
-    res.json(data);
+    await knowledgeProxy('get', '/health', { skipRetry: true, timeout: 5000 });
+    knowledgeStatus = 'connected';
   } catch (e) {
-    console.error(`Proxy /health FAILED: ${e.code || e.message}`);
-    res.status(502).json({ error: knowledgeError('/health') });
+    knowledgeStatus = knowledgeCircuitOpen ? 'circuit_open' : 'unreachable';
   }
+  res.json({
+    status: 'ok',
+    knowledge: knowledgeStatus,
+  });
 });
 
 // ─── Conversation history ──────────────────────────────────────────────
 app.get('/conversations/:userId', async (req, res) => {
   try {
-    const { data } = await knowledge.get(`/conversations/${req.params.userId}`);
+    const data = await knowledgeProxy('get', `/conversations/${req.params.userId}`);
     res.json(data);
   } catch (e) {
-    console.error(`Proxy /conversations FAILED: ${e.code || e.message}`);
     res.status(502).json({ error: knowledgeError(`/conversations/${req.params.userId}`) });
   }
 });
@@ -281,7 +330,7 @@ app.post('/bots/:id/settings/test-email', async (req, res) => {
 
 app.get('/bots/:id/knowledge', async (req, res) => {
   try {
-    const { data } = await knowledge.get('/sources', { params: { bot_id: req.params.id } });
+    const data = await knowledgeProxy('get', '/sources', { params: { bot_id: req.params.id } });
     res.json(data);
   } catch (e) { res.status(502).json({ error: knowledgeError('/sources') }); }
 });
@@ -341,7 +390,7 @@ app.post('/bots/:id/knowledge/upload', async (req, res) => {
 
 app.delete('/bots/:id/knowledge/:sourceId', async (req, res) => {
   try {
-    await knowledge.delete(`/sources/${req.params.sourceId}`);
+    await knowledgeProxy('delete', `/sources/${req.params.sourceId}`);
     res.json({ ok: true });
   } catch (e) {
     if (e.response?.status === 404) return res.status(404).json({ error: 'Fuente no encontrada' });
