@@ -424,8 +424,10 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
 
     // ═══ HARD validation: si no hay chunks en la BD, el modelo NO puede
     //      responder con información que no venga de una función ═══
-    //      Solo bloquea datos concretos (precios, fechas), no la longitud.
-    if (relevantChunks.length === 0 && content && !escalated && !emailSent) {
+    //      Excepción: si ya hubo tool calls exitosos (p.ej. calcular_presupuesto),
+    //      los datos vienen del sistema y NO son inventados.
+    const dataPreviouslyVerified = msg._emailSent || (msg._toolResults && msg._toolResults.filter(t => t.content && !t.content.includes('"ok":false')).length > 0);
+    if (relevantChunks.length === 0 && content && !escalated && !emailSent && !dataPreviouslyVerified) {
       const looksLikeKnowledge = (
         /\$[\d,]+/.test(content) ||           // menciona precios
         /\d{1,2}\s*(de|th|rd)\s/.test(content) ||  // menciona fechas
