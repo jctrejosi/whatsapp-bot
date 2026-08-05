@@ -1,7 +1,8 @@
 /**
  * Business logic functions callable by the AI model.
- * Each function reads business data from the bot's settings (planPricing, planIncludes, etc.)
- * making them configurable per bot. Hardcoded values are fallback defaults (Quinceañeras cruise).
+ * Each function reads business data from the bot's per-bot settings
+ * (planPricing, planIncludes, etc.), making them fully configurable.
+ * No hardcoded fallbacks — returns null when data isn't configured.
  */
 
 const { sendClientEmail } = require('./escalation');
@@ -9,17 +10,16 @@ const { getSettings } = require('./settings');
 
 /**
  * Calculate a custom plan with pricing breakdown.
- * Uses planPricing from bot settings, or hardcoded cruise defaults.
+ * Uses planPricing from bot settings. If not configured, returns null.
  */
-async function calcularPlan({ numPersonas, numAdultos, numMenores, tipoCabina = 'interior' }, botId) {
+async function calcularPlan({ numPersonas, numAdultos, numMenores, tipo }, botId) {
   const settings = await getSettings(botId);
-  const precios = settings.planPricing || {
-    interior: { guest1_2: 1736.26, guest3_4: 1406.26, menor17: 955.26, cubiertas: '15-21' },
-    oceanView: { guest1_2: 2006.26, guest3_4: 1566.26, menor17: 1065.26, cubiertas: '10-11' },
-    balcony:   { guest1_2: 2166.26, guest3_4: 1666.26, menor17: 1135.26, cubiertas: '11-12' },
-  };
+  const precios = settings.planPricing;
+  if (!precios) return null; // sin datos → no se puede calcular
 
-  const p = precios[tipoCabina] || precios.interior;
+  // usar el tipo indicado, o el primero disponible si no se especifica
+  const p = tipo ? precios[tipo] : Object.values(precios)[0];
+  if (!p) return null;
   let total = 0;
   let cabinas = [];
   let pendientes = { adultos: numAdultos, menores: numMenores };
@@ -60,16 +60,16 @@ async function calcularPlan({ numPersonas, numAdultos, numMenores, tipoCabina = 
     cabinaNum++;
   }
 
-  const nombres = { interior: 'Deluxe Interior (IR2)', oceanView: 'Infinity Ocean View (VL1)', balcony: 'Deluxe Balcony (BR2)' };
+  const tipoNombre = Object.keys(precios).find(k => precios[k] === p) || 'seleccionado';
 
   return {
-    tipoCabina: nombres[tipoCabina] || tipoCabina,
-    cubiertas: p.cubiertas,
+    tipo: tipoNombre,
+    cubiertas: p.cubiertas || p.ubicacion || '',
     totalPersonas: numPersonas,
     totalCabinas: cabinas.length,
     cabinas,
     total: Math.round(total * 100) / 100,
-    nota: 'Precios todo incluido: crucero, impuestos, bebidas, wifi y evento Quinceañeras.',
+    nota: 'Precios calculados según la configuración del bot.',
   };
 }
 
@@ -78,13 +78,7 @@ async function calcularPlan({ numPersonas, numAdultos, numMenores, tipoCabina = 
  */
 async function obtenerFechasPago(args, botId) {
   const settings = await getSettings(botId);
-  if (settings.planPayments) return settings.planPayments;
-  return {
-    primerDeposito: { monto: 200, moneda: 'USD', fecha: 'Inmediato al reservar' },
-    segundoDeposito: { monto: 400, moneda: 'USD', fecha: '10 de septiembre de 2026' },
-    pagoFinal: { fecha: '15 de diciembre de 2026' },
-    cancelacion: 'Depósito de $100 USD no reembolsable si se cancela antes de la fecha de pago final. No reembolsable después.',
-  };
+  return settings.planPayments || null;
 }
 
 /**
@@ -92,48 +86,22 @@ async function obtenerFechasPago(args, botId) {
  */
 async function obtenerQueIncluye(args, botId) {
   const settings = await getSettings(botId);
-  if (settings.planIncludes) return settings.planIncludes;
-  return [
-    'Transporte en Party Limo al puerto de Miami (Quinceañera + 1 invitado)',
-    'Camiseta para la Quinceañera',
-    'Camisetas para familiares y amigos',
-    'Regalo para la Quinceañera',
-    'Tratamiento deluxe en cabina la noche de llegada',
-    'Fiesta de bienvenida el primer día con bebidas incluidas',
-    'Salón exclusivo con DJ y barra libre',
-    'Sesión de fotos grupal de 1 hora con archivos digitales',
-    'Pastel de 3 pisos en la cena principal',
-    'Vals con los padres',
-    'Desayuno en cabina la mañana después de la ceremonia',
-    'Actividades y entretenimiento durante el crucero',
-  ];
+  return settings.planIncludes || null;
 }
 
 /**
- * Get the cruise itinerary.
+ * Get the itinerary / schedule.
  */
 async function obtenerItinerario(args, botId) {
   const settings = await getSettings(botId);
-  if (settings.planItinerary) return settings.planItinerary;
-  return {
-    dias: [
-      { dia: 1, fecha: '20 mar 2027', lugar: 'Miami, Florida', evento: 'Embarque 6:00 PM — Fiesta de bienvenida' },
-      { dia: 2, fecha: '21 mar 2027', lugar: 'Navegación', evento: 'Ensayo de vals — Noche temática MSC' },
-      { dia: 3, fecha: '22 mar 2027', lugar: 'Puerto Plata, Rep. Dominicana', evento: 'Llegada 9:00 AM' },
-      { dia: 4, fecha: '23 mar 2027', lugar: 'San Juan, Puerto Rico', evento: 'Llegada 9:00 AM' },
-      { dia: 5, fecha: '24 mar 2027', lugar: 'Navegación', evento: 'Desayuno en cabina para la Quinceañera' },
-      { dia: 6, fecha: '25 mar 2027', lugar: 'Navegación', evento: 'Peinado, maquillaje, Gala Quinceañera con DJ, vals, fotos' },
-      { dia: 7, fecha: '26 mar 2027', lugar: 'Ocean Cay, Bahamas', evento: 'Llegada 8:00 AM — Fiesta de despedida' },
-      { dia: 8, fecha: '27 mar 2027', lugar: 'Miami, Florida', evento: 'Desembarque 7:00 AM' },
-    ],
-  };
+  return settings.planItinerary || null;
 }
 
 /**
  * Sales closing — registers the lead and triggers escalation to a human advisor.
  * The `_escalate` flag is detected by chatWithDeepSeek to send the email.
  */
-async function iniciarCierreVenta({ nombre, telefono, email, num_personas, tipo_cabina, notas, motivo }, botId) {
+async function iniciarCierreVenta({ nombre, telefono, email, num_personas, tipo, notas, motivo }, botId) {
   return {
     ok: true,
     lead: {
@@ -141,9 +109,9 @@ async function iniciarCierreVenta({ nombre, telefono, email, num_personas, tipo_
       telefono: telefono || '',
       email: email || '',
       num_personas: num_personas || null,
-      tipo_cabina: tipo_cabina || '',
+      tipo: tipo || '',
       notas: notas || '',
-      motivo: motivo || 'Interesado en el crucero de Quinceañeras',
+      motivo: motivo || 'Interesado en el producto/servicio',
     },
     _escalate: true, // signal for chatWithDeepSeek to send escalation email
   };
@@ -160,7 +128,7 @@ async function enviarCorreo({ email, informacion, asunto }, botId) {
   }
   const result = await sendClientEmail({
     to,
-    subject: asunto || 'Información solicitada — Quinceañera Cruise Bot',
+    subject: asunto || 'Información solicitada — Plataforma de Bots',
     body: informacion || 'Aquí tienes la información que solicitaste.',
     botId,
   });
@@ -243,7 +211,7 @@ const TOOLS = [
           telefono:     { type: 'string', description: 'Teléfono de contacto.' },
           email:        { type: 'string', description: 'Correo electrónico.' },
           num_personas: { type: 'integer', description: 'Número total de personas.' },
-          tipo_cabina:  { type: 'string', description: 'Tipo de opción preferida por el cliente.' },
+          tipo:  { type: 'string', description: 'Tipo de opción preferida por el cliente.' },
           notas:        { type: 'string', description: 'Notas adicionales.' },
           motivo:       { type: 'string', description: 'Resumen breve de la solicitud del cliente.' },
         },
@@ -285,7 +253,7 @@ const TOOLS = [
           numPersonas:  { type: 'integer', description: 'Número total de personas del grupo' },
           numAdultos:   { type: 'integer', description: 'Número de adultos' },
           numMenores:   { type: 'integer', description: 'Número de menores' },
-          tipoCabina:   { type: 'string', description: 'Tipo de opción seleccionada (según el catálogo del negocio).' },
+          tipo:   { type: 'string', description: 'Tipo de opción seleccionada (según el catálogo del negocio).' },
         },
         required: ['numPersonas', 'numAdultos', 'numMenores'],
       },

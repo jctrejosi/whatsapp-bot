@@ -414,15 +414,21 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
   // Calling functions catalog
   const [functionCatalog, setFunctionCatalog] = useState([]);
 
+  const wasOpen = useRef(false);
+
   useEffect(() => {
-    if (!open) return;
+    if (!open) { wasOpen.current = false; return; }
+    const justOpened = !wasOpen.current;
+    wasOpen.current = true;
+
     setMsg('');
     setTestResult('');
     setBotNameInput(botId ? (botName || '') : '');
-    setTab('model');
-    // Siempre arrancar en modo título (no editable); solo se habilita con el botón ✏️
-    setNameEdit(false);
-    setNameValue(botName || '');
+    if (justOpened) {
+      setTab('model');
+      setNameEdit(false);
+      setNameValue(botName || '');
+    }
     const fetchSettings = botId ? getBotSettings(botId) : getSettings();
     fetchSettings
       .then(setSettings)

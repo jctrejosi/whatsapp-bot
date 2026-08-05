@@ -27,24 +27,25 @@ const { ALLOWED_MODELS } = require('./settings');
 
 // System prompt default (fallback si el bot no tiene uno propio).
 // Usa {context} como marcador donde se insertan los chunks de conocimiento.
-const DEFAULT_SYSTEM_PROMPT = `Eres un asistente virtual profesional. Responde ÚNICAMENTE con la información disponible en los DATOS DEL EVENTO. No inventes nada.
+const DEFAULT_SYSTEM_PROMPT = `Eres un asistente virtual profesional. Responde ÚNICAMENTE con los DATOS DISPONIBLES. No uses conocimiento externo ni tu entrenamiento general. No inventes nada.
 
 ESTILO:
 - Responde en el mismo idioma del usuario, con calidez y entusiasmo. Usa emojis.
 - NUNCA menciones "fuentes", "contexto" ni términos técnicos.
 - Si ya hay historial, NO saludes de nuevo.
-- Si no encuentras la información que el cliente necesita, ofrécele contactar a un asesor.
+- Si no encuentras la información, ofrece contactar a un asesor.
 
-FUNCIONES DISPONIBLES:
-- Si el cliente pide hablar con una persona (asesor, agente, atención personalizada) → pide sus datos y usa comunicar_asesor.
-- Si el cliente pide que le envíes la información por correo → pide su email y usa enviar_correo_informacion.
-- Cuando el cliente está listo para comprar → pide sus datos y usa iniciar_cierre_venta.
-- Para saber qué incluye el producto/servicio → usa listar_caracteristicas.
-- Para el itinerario, cronograma o agenda → usa obtener_cronograma.
-- Para fechas de pago y cancelaciones → usa obtener_fechas_pago.
-- Para cotizaciones o presupuestos según número de personas → pide los datos necesarios y usa calcular_presupuesto.
+FUNCIONES — úsalas DIRECTAMENTE, sin preámbulos ni sondeos:
+- Para saber qué incluye → llama listar_caracteristicas y entrega TODA la info.
+- Para itinerario/cronograma → llama obtener_cronograma y entrega el cronograma.
+- Para fechas de pago → llama obtener_fechas_pago.
+- Para precios/cotizaciones → si tienes los datos necesarios llama calcular_presupuesto.
+  Si NO los tienes, entrega PRIMERO toda la info disponible y luego pregunta.
+- Si el cliente pide hablar con una persona → pide datos y usa comunicar_asesor.
+- Si el cliente pide envío por correo → pide su email y usa enviar_correo_informacion.
+- Cuando el cliente está listo para comprar → pide datos y usa iniciar_cierre_venta.
 
-DATOS DEL EVENTO:
+DATOS DISPONIBLES:
 {context}`;
 
 const DEFAULT_SYSTEM_PROMPT_FALLBACK = `Eres un asistente virtual profesional. Responde en el mismo idioma del usuario, con calidez y entusiasmo.
@@ -299,6 +300,16 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     messages[messages.length - 1].content += dynamicFuncs;
   }
 
+  // ═══ Validation layer: avisar si la base de conocimiento está vacía ═══
+  if (relevantChunks.length === 0) {
+    messages[messages.length - 1].content +=
+      '\n\n⚠️ AVISO IMPORTANTE: La base de conocimiento está VACÍA (no se ha cargado ningún documento).\n' +
+      'Responde ÚNICAMENTE usando los resultados de las funciones habilitadas.\n' +
+      'Para cualquier consulta que no esté cubierta por las funciones, di:\n' +
+      '"No tengo esa información en mi base de conocimiento. ¿Quieres que contacte a un asesor?"\n' +
+      'NO improvises ni uses tu entrenamiento general para responder preguntas de conocimiento.';
+  }
+
   // Historial previo como turnos reales de mensajes (contexto para el modelo)
   const { maxHistoryMessages } = await getSettings(botId);
   for (const m of history.slice(-maxHistoryMessages)) {
@@ -329,7 +340,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
         lead.telefono ? `📞 ${lead.telefono}` : '',
         lead.email ? `✉️ ${lead.email}` : '',
         lead.num_personas ? `👥 ${lead.num_personas} personas` : '',
-        lead.tipo_cabina ? `🛏️ ${lead.tipo_cabina}` : '',
+        lead.tipo ? `🛏️ ${lead.tipo}` : '',
         lead.notas ? `📝 ${lead.notas}` : '',
         lead.motivo ? `💬 ${lead.motivo}` : '',
       ].filter(Boolean).join(' | ');
