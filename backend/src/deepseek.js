@@ -276,6 +276,29 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
 
   messages.push({ role: 'system', content: systemPrompt });
 
+  // ═══ Dynamic function list: solo las habilitadas aparecen en el prompt ═══
+  const enabledTools = await getToolsForBot(botId);
+  const enabledNames = enabledTools.map((t) => t.function.name);
+  const allNames = TOOLS.map((t) => t.function.name);
+  const restricted = !(!settings.enabledFunctions || settings.enabledFunctions.length === 0);
+  const disabled = allNames.filter((n) => !enabledNames.includes(n));
+  if (restricted && disabled.length > 0) {
+    // Reemplazar la sección FUNCIONES del prompt dinámicamente
+    const funcNames = {
+      listar_caracteristicas: 'Listar características',
+      obtener_cronograma: 'Cronograma / Itinerario',
+      obtener_fechas_pago: 'Fechas de pago',
+      calcular_presupuesto: 'Calcular presupuesto',
+      comunicar_asesor: 'Comunicar con asesor',
+      enviar_correo_informacion: 'Enviar info por correo',
+      iniciar_cierre_venta: 'Cierre de venta',
+    };
+    const habilitadas = enabledNames.map((n) => `✅ ${funcNames[n] || n}`).join('\n');
+    const noHabilitadas = disabled.map((n) => `❌ ${funcNames[n] || n}`).join('\n');
+    const dynamicFuncs = `\nFUNCIONES HABILITADAS:\n${habilitadas}\n\nFUNCIONES NO DISPONIBLES:\n${noHabilitadas}\n\n⚠️ Si el cliente pide una función NO DISPONIBLE, dile amablemente que esa acción no está configurada para este bot y ofrécele las que sí lo están.`;
+    messages[messages.length - 1].content += dynamicFuncs;
+  }
+
   // Historial previo como turnos reales de mensajes (contexto para el modelo)
   const { maxHistoryMessages } = await getSettings(botId);
   for (const m of history.slice(-maxHistoryMessages)) {
@@ -290,7 +313,12 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
   let emailSent = false;
   try {
     const msg = await callDeepSeek(messages, await getToolsForBot(botId), 1, botId);
-    content = msg.content;
+    content = (msg.content || '')
+      // Limpiar cualquier XML de function-call filtrado en el texto de respuesta
+      .replace(/<function_calls>[\s\S]*?<\/function_calls>/gi, '')
+      .replace(/<\?xml[\s\S]*?\?>/gi, '')
+      .replace(/<invoke[\s\S]*?<\/invoke>/gi, '')
+      .trim();
     emailSent = msg._emailSent === true;
     if (msg._escalate) {
       escalated = true;

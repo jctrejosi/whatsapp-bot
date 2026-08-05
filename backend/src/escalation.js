@@ -208,10 +208,15 @@ async function sendClientEmail({ to, subject, body, botId }) {
   }
 
   const from = `${SENDER_NAME} <${senderEmail}>`;
+  const cleanBody = (body || '')
+    .replace(/<function_calls>[\s\S]*?<\/function_calls>/gi, '')
+    .replace(/<\?xml[\s\S]*?\?>/gi, '')
+    .replace(/<invoke[\s\S]*?<\/invoke>/gi, '')
+    .trim();
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:580px;padding:24px;">
       <h2>📨 Información solicitada</h2>
-      <div style="white-space:pre-wrap;line-height:1.7;font-size:14px;color:#333;">${body || 'Aquí tienes la información que solicitaste.'}</div>
+      <div style="white-space:pre-wrap;line-height:1.7;font-size:14px;color:#333;">${cleanBody || 'Aquí tienes la información que solicitaste.'}</div>
       <hr style="margin-top:24px;">
       <p style="color:#aaa;font-size:12px;">Enviado por la Plataforma de Bots</p>
     </div>
