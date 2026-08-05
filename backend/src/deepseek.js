@@ -86,104 +86,17 @@ async function listModels() {
   }
 }
 
-/**
- * Detect if text is Spanish. Simple heuristic.
- */
-function isSpanish(text) {
-  const spanishWords = /\b(de|que|el|la|los|las|un|una|en|con|por|para|del|se|no|es|son|me|te|le|lo|su|mi|tu|al|como|más|pero|y|o|si|ya|muy|hay|tiene|tienen|está|están|fue|eran|hace|hacen|dice|dicen|puede|pueden|quiero|quieres|tienes|cuál|cómo|cuándo|dónde|quién|cuánto|hola|gracias|buenos|buenas|días|tardes|noches)\b/i;
-  const matchCount = (text.match(spanishWords) || []).length;
-  const wordCount = text.split(/\s+/).filter(w => w.length > 1).length;
-  const hasSpecialChars = /[áéíóúñ¿¡]/.test(text);
-  // Spanish if: has special chars OR >20% of words are Spanish markers
-  return hasSpecialChars || (wordCount > 0 && matchCount / wordCount >= 0.2 && matchCount >= 1);
-}
 
-/**
- * Translate text from English to Spanish using DeepSeek.
- */
-async function translateToSpanish(text) {
-  if (!text || text.length < 5) return text;
-  try {
-    const { data } = await axios.post(
-      'https://api.deepseek.com/chat/completions',
-      {
-        model: 'deepseek-chat',
-        messages: [
-          { role: 'system', content: 'Translate the following text to Spanish. Keep emojis, markdown formatting, and line breaks. Return ONLY the translation.' },
-          { role: 'user', content: text.substring(0, 3000) },
-        ],
-        temperature: 0,
-        max_tokens: 4000,
-      },
-      { headers: DEEPSEEK_HEADERS, timeout: 10000 }
-    );
-    const translated = data.choices[0].message.content?.trim();
-    if (translated && translated.length > 0) {
-      console.log(`  🌐 Response translated to Spanish (${text.length} → ${translated.length} chars)`);
-      return translated;
-    }
-  } catch (err) {
-    console.warn('  🌐 Response translation failed:', err.message);
-  }
-  return text;
-}
-
-/**
- * Translate a query to English for better cross-lingual embedding matches.
- * Falls back to the original query if translation fails.
- */
-async function translateToEnglish(text) {
-  // Si ya es inglés (sin caracteres no-ASCII, sin palabras comunes en español), no traducir
-  const nonAscii = (text.match(/[^\x00-\x7F]/g) || []).length;
-  const spanishMarkers = /[áéíóúñ¿¡]/.test(text);
-  if (nonAscii === 0 && !spanishMarkers) {
-    // Puede ser inglés o español sin tildes. Verificar palabras comunes.
-    const spanishWords = /\b(de|que|el|la|los|las|un|una|en|con|por|para|del|se|no|es|son|me|te|le|lo|su|mi|tu|al|como|más|pero|y|o|si|ya|muy|hay|tiene|tienen|está|están|fue|eran|hace|hacen|dice|dicen|puede|pueden|quiero|quieres|tienes|cuál|cómo|cuándo|dónde|quién|cuánto|hola|gracias|buenos|buenas|días|tardes|noches)\b/i;
-    const matchCount = (text.match(spanishWords) || []).length;
-    const wordCount = text.split(/\s+/).length;
-    // Si +30% de las palabras son españolas o hay 2+ marcadores → traducir
-    if (wordCount > 0 && matchCount / wordCount < 0.3 && matchCount < 2) {
-      return text; // probablemente inglés
-    }
-  }
-
-  try {
-    const { data } = await axios.post(
-      'https://api.deepseek.com/chat/completions',
-      {
-        model: 'deepseek-chat',
-        messages: [
-          { role: 'system', content: 'Translate the user message to English. Return ONLY the translation, nothing else.' },
-          { role: 'user', content: text },
-        ],
-        temperature: 0,
-        max_tokens: 500,
-      },
-      { headers: DEEPSEEK_HEADERS, timeout: 8000 }
-    );
-    const translated = data.choices[0].message.content?.trim();
-    if (translated && translated.length > 0) {
-      console.log(`  🌐 Translated query: "${text.substring(0, 60)}..." → "${translated.substring(0, 60)}..."`);
-      return translated;
-    }
-  } catch (err) {
-    console.warn('  🌐 Translation failed, using original query:', err.message);
-  }
-  return text;
-}
 
 /**
  * Search the knowledge base for relevant context.
- * Translates the query to English first for better cross-lingual embedding matches.
  */
 async function searchKnowledge(query, botId) {
   const { topK, useReranker, minConfidence } = await getSettings(botId);
   try {
-    // Translate query to English for better embedding similarity (el modelo es monolingüe)
-    const searchQuery = await translateToEnglish(query);
     const { data } = await axios.post(
       `${KNOWLEDGE_SERVICE_URL}/search`,
-      { query: searchQuery, top_k: topK, use_reranker: useReranker, min_similarity: minConfidence },
+      { query, top_k: topK, use_reranker: useReranker, min_similarity: minConfidence },
       { headers: { 'Content-Type': 'application/json' }, params: { bot_id: botId } }
     );
     return data.results || [];
@@ -306,13 +219,9 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     };
   }
 
-  // 0. Traducir query a inglés (mejor matching de embeddings + comprensión del modelo)
-  const queryInEnglish = await translateToEnglish(userMessage);
-  const isTranslated = queryInEnglish !== userMessage;
-
-  // 1. Retrieve relevant knowledge (usa la query traducida para evitar doble traducción)
+  // 1. Retrieve relevant knowledge
   try {
-    relevantChunks = await searchKnowledge(isTranslated ? queryInEnglish : userMessage, botId);
+    relevantChunks = await searchKnowledge(userMessage, botId);
   } catch (err) {
     console.error('Search error:', err.message);
   }
@@ -374,10 +283,6 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     systemPrompt = systemPrompt.replace('{context}', context);
   }
 
-  // Si el mensaje fue traducido, indicar al modelo que responda en el idioma original
-  if (isTranslated) {
-    systemPrompt = `⚠️ INSTRUCCIÓN CRÍTICA: El usuario original escribe en español. TÚ DEBES responder en español. No respondas en inglés bajo ninguna circunstancia, aunque los DATOS DISPONIBLES estén en inglés. Mensaje original del usuario: "${userMessage.substring(0, 100)}"\n\n${systemPrompt}`;
-  }
 
   messages.push({ role: 'system', content: systemPrompt });
 
@@ -420,7 +325,7 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     messages.push({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text });
   }
 
-  messages.push({ role: 'user', content: queryInEnglish });
+  messages.push({ role: 'user', content: userMessage });
 
   // 3. Call DeepSeek with function calling
   let content;
@@ -434,13 +339,6 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
       .replace(/<\?xml[\s\S]*?\?>/gi, '')
       .replace(/<invoke[\s\S]*?<\/invoke>/gi, '')
       .trim();
-
-    // ═══ Post-response language validation: si el usuario escribió en español
-    //      y el modelo respondió en inglés, traducir la respuesta ═══
-    if (isTranslated && isSpanish(userMessage) && content && !isSpanish(content)) {
-      console.log('  🌐 Response is in English but user wrote in Spanish — translating back...');
-      content = await translateToSpanish(content);
-    }
 
     // ═══ HARD validation: si no hay chunks en la BD, el modelo NO puede
     //      responder con información que no venga de una función ═══
