@@ -29,7 +29,7 @@ function TypingIndicator({ botName }) {
 }
 
 /* ─── Chat Panel ──────────────────────── */
-function ChatPanel({ online, botId, botName }) {
+function ChatPanel({ online, botId, botName, checking, onRetry, error }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -117,11 +117,23 @@ function ChatPanel({ online, botId, botName }) {
     <div className="chat-panel">
       <div className="messages">
         {!online && (
-          <div className="message bot">
-            <div className="label">🤖 {botName || 'Bot'}</div>
-            <div className="bubble">
-              ⏳ Conectando con el servicio...
+          <div className="connect-screen">
+            <div className={`connect-spinner${checking ? '' : ' slow'}`} />
+            <div className="connect-title">
+              {online === null ? 'Conectando con el servidor...' : 'Servidor no disponible'}
             </div>
+            <div className="connect-hint">
+              {online === null
+                ? 'El servidor puede estar despertando (Render free tarda ~30s). No cierres la página.'
+                : error || 'Verifica tu conexión o que el backend esté levantado.'}
+            </div>
+            <button
+              className="btn btn-primary"
+              onClick={onRetry}
+              disabled={checking}
+            >
+              {checking ? '⏳ Reintentando...' : '↻ Reintentar'}
+            </button>
           </div>
         )}
         {online && messages.length === 0 && welcome && (
@@ -916,7 +928,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
 }
 
 /* ─── Header ──────────────────────────── */
-function Header({ status, error, onMenuToggle, botName }) {
+function Header({ status, error, checking, onRetry, onMenuToggle, botName }) {
   const label =
     status === true ? '✅ API conectada' :
     status === false ? '🔴 ' + (error || 'API desconectada') :
@@ -927,8 +939,18 @@ function Header({ status, error, onMenuToggle, botName }) {
     <div className="header">
       <h1>🚢 {botName || 'Plataforma'} — Knowledge Chat</h1>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-        {cls && <span className={`status-dot ${cls}`} />}
+        {cls && <span className={`status-dot ${cls}${checking ? ' pulse' : ''}`} />}
         <span style={{ color: 'var(--gray-200)' }}>{label}</span>
+        {status !== true && (
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={onRetry}
+            disabled={checking}
+            title="Reintentar conexión"
+          >
+            {checking ? '⏳' : '↻ Retry'}
+          </button>
+        )}
         <button className="hamburger" onClick={onMenuToggle} aria-label="Menú">
           ☰
         </button>
@@ -941,6 +963,7 @@ function Header({ status, error, onMenuToggle, botName }) {
 export default function App() {
   const [online, setOnline] = useState(null);
   const [error, setError] = useState('');
+  const [checking, setChecking] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [bots, setBots] = useState([]);
@@ -956,15 +979,27 @@ export default function App() {
 
   useEffect(() => { loadBots(); }, [loadBots]);
 
-  // Health check once
-  useEffect(() => {
-    const check = async () => {
-      const result = await healthCheck();
-      setOnline(result.ok);
-      setError(result.ok ? '' : result.status ? `Error ${result.status}` : 'Sin conexión');
-    };
-    check();
+  // Health check + retry
+  const retryConnection = useCallback(async () => {
+    setChecking(true);
+    setError('');
+    const result = await healthCheck();
+    setOnline(result.ok);
+    setError(result.ok ? '' : result.status ? `Error ${result.status}` : 'Sin conexión');
+    setChecking(false);
+    return result.ok;
   }, []);
+
+  useEffect(() => {
+    retryConnection();
+  }, [retryConnection]);
+
+  // Auto-retry cada 20s mientras el servidor esté offline (ej. Render free despertando)
+  useEffect(() => {
+    if (online !== false) return;
+    const t = setInterval(() => retryConnection(), 20000);
+    return () => clearInterval(t);
+  }, [online, retryConnection]);
 
   const selectedBot = bots.find((b) => b.id === selectedBotId);
   const confirmDelete = async () => {
@@ -1054,10 +1089,19 @@ export default function App() {
         <Header
           status={online}
           error={error}
+          checking={checking}
+          onRetry={retryConnection}
           onMenuToggle={() => setSidebarOpen((o) => !o)}
           botName={selectedBot?.name}
         />
-        <ChatPanel online={online === true} botId={selectedBotId} botName={selectedBot?.name} />
+        <ChatPanel
+          online={online === true}
+          botId={selectedBotId}
+          botName={selectedBot?.name}
+          checking={checking}
+          onRetry={retryConnection}
+          error={error}
+        />
       </main>
 
       <SettingsPanel
