@@ -878,13 +878,21 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: 6 }}>
-                      <a
-                        className="btn btn-secondary btn-sm"
-                        href={botId ? getBotSourceDownloadUrl(botId, s.id) : '#'}
-                        download
-                        title={s.file_available ? 'Descargar archivo' : 'Archivo no disponible (re-súbelo para habilitar descarga)'}
-                        style={{ opacity: s.file_available ? 1 : 0.4 }}
-                      >⬇️</a>
+                      {s.file_available ? (
+                        <a
+                          className="btn btn-secondary btn-sm"
+                          href={botId ? getBotSourceDownloadUrl(botId, s.id) : '#'}
+                          download
+                          title="Descargar archivo"
+                        >⬇️</a>
+                      ) : (
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          style={{ opacity: 0.4 }}
+                          title="Archivo no disponible para descarga"
+                          onClick={() => setMsg('📁 Este archivo no está disponible para descarga. Solo se conserva en Cloudinary (plan gratuito: máximo 10 MB).')}
+                        >⬇️</button>
+                      )}
                       <button className="btn btn-secondary btn-sm" onClick={() => handleDeleteSource(s.id)}>🗑️</button>
                     </div>
                   </div>

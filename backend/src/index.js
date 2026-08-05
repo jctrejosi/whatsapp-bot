@@ -302,32 +302,26 @@ app.post('/bots/:id/knowledge/upload', async (req, res) => {
   try {
     await processUpload();
 
-    // 1. Subir a Cloudinary (no bloqueante — si falla, seguimos con el disco local)
-    let cloudinaryUrl = null;
-    try {
-      const { uploadBuffer } = require('./cloudinary');
-      const cloudResult = await uploadBuffer(req.file.buffer, {
-        folder: `bots/${req.params.id}`,
-        original_filename: req.file.originalname,
-      });
-      cloudinaryUrl = cloudResult.url;
-    } catch (cloudErr) {
-      console.warn('Cloudinary upload failed (continuing without it):', cloudErr.message);
-    }
+    // 1. Subir a Cloudinary
+    const { uploadBuffer } = require('./cloudinary');
+    const cloudResult = await uploadBuffer(req.file.buffer, {
+      folder: `bots/${req.params.id}`,
+      original_filename: req.file.originalname,
+    });
 
     // 2. Enviar al knowledge-service para extracción + chunking + embeddings
     const FormData = require('form-data');
     const form = new FormData();
     form.append('file', req.file.buffer, { filename: req.file.originalname, contentType: req.file.mimetype });
     if (req.params.id) form.append('bot_id', req.params.id);
-    if (cloudinaryUrl) form.append('cloudinary_url', cloudinaryUrl);
+    form.append('cloudinary_url', cloudResult.url);
     const { data } = await axios.post(`${KNOWLEDGE_URL}/ingest`, form, {
       headers: { ...form.getHeaders() },
       maxBodyLength: Infinity,
       maxContentLength: Infinity,
     });
 
-    res.json({ ...data, cloudinary_url: cloudinaryUrl });
+    res.json({ ...data, cloudinary_url: cloudResult.url });
   } catch (e) {
     console.error('Upload error:', e.response?.data || e.message);
     const upstream = e.response?.data?.detail || e.message;
