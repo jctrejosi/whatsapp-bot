@@ -283,7 +283,6 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     systemPrompt = systemPrompt.replace('{context}', context);
   }
 
-
   messages.push({ role: 'system', content: systemPrompt });
 
   // ═══ Dynamic function list: solo las habilitadas aparecen en el prompt ═══
@@ -360,7 +359,10 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
     if (relevantChunks.length > 0 && content && !escalated) {
       const allChunksText = relevantChunks.map(c => c.content).join(' ').toLowerCase();
 
-      // Extraer todo tipo de datos concretos de la respuesta
+      // Extraer solo datos independientes del idioma (precios y números).
+      // Fechas en palabras y nombres propios NO se comparan: la respuesta puede
+      // estar en español mientras los chunks están en inglés (p.ej. "20 de marzo"
+      // vs "MARCH 20"), lo que haría fallar la verificación siempre.
       const dataPoints = [];
 
       // Precios: $1,736.26, $200 USD, etc.
@@ -370,19 +372,6 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
       (content.match(/\b\d{3,}\b/g) || []).forEach(d => {
         // Ignorar años (2024-2030) y horas (1000-2400)
         if (!/^(20[2-9]\d|1[0-9]{3}|\d{4})$/.test(d)) dataPoints.push(d);
-      });
-
-      // Fechas: "20 de marzo", "March 20", "20/03/2027"
-      (content.match(/\d{1,2}\s+(de\s+)?[a-záéíóúñ]+/gi) || []).forEach(d => dataPoints.push(d));
-      (content.match(/\d{1,2}[\/.-]\d{1,2}([\/.-]\d{2,4})?/g) || []).forEach(d => dataPoints.push(d));
-
-      // Nombres propios potenciales (palabras con mayúscula que no sean inicio de oración)
-      const properNouns = content.match(/\b[A-Z][a-z]{3,}\b/g) || [];
-      properNouns.forEach(d => {
-        // Solo agregar si parece nombre de lugar/evento/producto (no palabras comunes)
-        if (!/^(The|This|And|But|For|With|You|Your|Our|Los|Las|Del|Por|Para|Una|Cada|Más|Son|Hay|Sus|Qué|Cuál|Como|Donde|Cuando|Cuanto|Hola|Gracias)$/i.test(d)) {
-          dataPoints.push(d);
-        }
       });
 
       // Normalizar comas (el modelo escribe $2,166.26 pero el PDF tiene $2166.26)
