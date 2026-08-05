@@ -1025,6 +1025,76 @@ function Header({ status, error, checking, onRetry, onMenuToggle, botName }) {
   );
 }
 
+/* ─── Global Settings Modal ─────────────── */
+function GlobalSettingsModal({ open, onClose }) {
+  const [prompt, setPrompt] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setMsg('');
+    setLoading(true);
+    getSettings()
+      .then((s) => setPrompt(s.systemPrompt || ''))
+      .catch((e) => setMsg('❌ ' + e.message))
+      .finally(() => setLoading(false));
+  }, [open]);
+
+  const save = async () => {
+    setSaving(true);
+    setMsg('');
+    try {
+      await updateSettings({ systemPrompt: prompt });
+      setMsg('✅ Prompt global actualizado');
+    } catch (e) {
+      setMsg('❌ ' + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open) return null;
+
+  return (
+    <div className="modal-overlay" onClick={saving ? undefined : onClose}>
+      <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>⚙️ Configuración General</h2>
+          <button className="btn btn-secondary btn-sm" onClick={onClose} disabled={saving}>✕</button>
+        </div>
+        <div className="modal-body">
+          {loading ? (
+            <p className="settings-hint">Cargando...</p>
+          ) : (
+            <div className="settings-section">
+              <h3>🧠 Prompt general del sistema</h3>
+              <p className="settings-hint">
+                Este prompt se usa como base para todos los bots que no tengan uno propio.
+              </p>
+              <textarea
+                className="bot-name-input"
+                rows={12}
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder="Escribe el prompt general para todos los bots..."
+                style={{ width: '100%', resize: 'vertical', fontFamily: 'monospace', fontSize: 11, lineHeight: 1.5 }}
+              />
+            </div>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-primary" onClick={save} disabled={saving || loading}>
+            {saving ? 'Guardando...' : '💾 Guardar'}
+          </button>
+          {msg && <span className="settings-status">{msg}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─── App ─────────────────────────────── */
 export default function App() {
   const [online, setOnline] = useState(null);
@@ -1035,6 +1105,7 @@ export default function App() {
   const [bots, setBots] = useState([]);
   const [selectedBotId, setSelectedBotId] = useState(null);
   const [creatingBot, setCreatingBot] = useState(false);
+  const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   const [deletingBot, setDeletingBot] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState('');
   const [sourcesVersion, setSourcesVersion] = useState(0);
@@ -1155,11 +1226,7 @@ export default function App() {
         <div className="sidebar-section">
           <button
             className="btn btn-secondary btn-block"
-            onClick={() => {
-              setSelectedBotId(null);
-              setCreatingBot(false);
-              setSettingsOpen(true);
-            }}
+            onClick={() => setGlobalSettingsOpen(true)}
           >
             ⚙️ Configuración General
           </button>
@@ -1235,6 +1302,11 @@ export default function App() {
           </div>
         </div>
       )}
+
+      <GlobalSettingsModal
+        open={globalSettingsOpen}
+        onClose={() => setGlobalSettingsOpen(false)}
+      />
     </div>
   );
 }
