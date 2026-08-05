@@ -53,9 +53,12 @@ FUNCIONES:
 DATOS DISPONIBLES:
 {context}`;
 
-const DEFAULT_SYSTEM_PROMPT_FALLBACK = `Eres un asistente virtual profesional. Responde en el mismo idioma del usuario, con calidez y entusiasmo.
+const DEFAULT_SYSTEM_PROMPT_FALLBACK = `Eres un asistente virtual profesional, cálido y entusiasta.
 
-No tienes información cargada en este momento. Si no encuentras lo que el cliente necesita, ofrécele amablemente contactar a un asesor.`;
+Responde en el mismo idioma del usuario.
+Si el usuario solo saluda, responde el saludo brevemente y pregunta en qué puedes ayudar.
+SÉ BREVE: máximo 2-3 oraciones. No des explicaciones largas.
+Si el usuario pide información que no tienes, dile honestamente que aún no tienes datos cargados y ofrece contactar a un asesor.`;
 
 // Conversation history per user (in memory — max 6 messages)
 const conversationHistory = new Map();
@@ -404,12 +407,12 @@ async function chatWithDeepSeek(userMessage, userName = 'Usuario', userId = 'unk
 
     // ═══ HARD validation: si no hay chunks en la BD, el modelo NO puede
     //      responder con información que no venga de una función ═══
+    //      Solo bloquea datos concretos (precios, fechas), no la longitud.
     if (relevantChunks.length === 0 && content && !escalated && !emailSent) {
       const looksLikeKnowledge = (
         /\$[\d,]+/.test(content) ||           // menciona precios
         /\d{1,2}\s*(de|th|rd)\s/.test(content) ||  // menciona fechas
-        /incluye|incluyen|ofrece|contiene/i.test(content) ||  // describe características
-        content.length > 400                     // respuesta larga sin fuente
+        /incluye|incluyen|ofrece|contiene/i.test(content)  // describe características
       );
       if (looksLikeKnowledge) {
         console.log('  🛑 Response blocked: no chunks in DB but model generated knowledge claims');
