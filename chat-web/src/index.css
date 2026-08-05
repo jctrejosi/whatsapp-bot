@@ -28,7 +28,9 @@ body {
   background: var(--gray-900);
   color: var(--white);
   height: 100vh;
+  height: 100dvh; /* viewport dinámico: evita que la barra de URL del móvil corte el layout */
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 #root {
@@ -73,6 +75,10 @@ body {
   background: var(--navy);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   gap: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  flex-shrink: 0;
 }
 
 .header h1 {
