@@ -35,6 +35,11 @@ function envDefaults() {
     systemPrompt: '',
     welcomeMessage: '',
     enabledFunctions: [], // vacío = todas habilitadas; si tiene valores, solo esas
+    // Datos de negocio configurables (para las calling functions)
+    planPricing: null,   // { tiers: { nombre: { guest1_2: number, ... } }, ... }
+    planIncludes: null,   // ["item 1", "item 2", ...]
+    planItinerary: null,  // [{ dia: 1, fecha: "...", lugar: "...", evento: "..." }, ...]
+    planPayments: null,   // { primerDeposito: {...}, segundoDeposito: {...}, pagoFinal: {...}, cancelacion: "..." }
   };
 }
 
@@ -67,6 +72,10 @@ const VALIDATORS = {
   systemPrompt: (v) => typeof v === 'string',
   welcomeMessage: (v) => typeof v === 'string',
   enabledFunctions: (v) => Array.isArray(v) && v.every((f) => typeof f === 'string' && f.trim().length > 0),
+  planPricing: (v) => v === null || typeof v === 'object',
+  planIncludes: (v) => v === null || (Array.isArray(v) && v.every((e) => typeof e === 'string')),
+  planItinerary: (v) => v === null || Array.isArray(v),
+  planPayments: (v) => v === null || typeof v === 'object',
 };
 
 const settingsCache = new Map(); // key: botId || '__global__'

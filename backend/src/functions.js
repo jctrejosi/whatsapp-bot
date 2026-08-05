@@ -1,15 +1,19 @@
 /**
  * Business logic functions callable by the AI model.
+ * Each function reads business data from the bot's settings (planPricing, planIncludes, etc.)
+ * making them configurable per bot. Hardcoded values are fallback defaults (Quinceañeras cruise).
  */
 
 const { sendClientEmail } = require('./escalation');
+const { getSettings } = require('./settings');
 
 /**
  * Calculate a custom plan with pricing breakdown.
+ * Uses planPricing from bot settings, or hardcoded cruise defaults.
  */
-function calcularPlan({ numPersonas, numAdultos, numMenores, tipoCabina = 'interior' }) {
-  // Pricing table from PDF
-  const precios = {
+async function calcularPlan({ numPersonas, numAdultos, numMenores, tipoCabina = 'interior' }, botId) {
+  const settings = await getSettings(botId);
+  const precios = settings.planPricing || {
     interior: { guest1_2: 1736.26, guest3_4: 1406.26, menor17: 955.26, cubiertas: '15-21' },
     oceanView: { guest1_2: 2006.26, guest3_4: 1566.26, menor17: 1065.26, cubiertas: '10-11' },
     balcony:   { guest1_2: 2166.26, guest3_4: 1666.26, menor17: 1135.26, cubiertas: '11-12' },
@@ -72,7 +76,9 @@ function calcularPlan({ numPersonas, numAdultos, numMenores, tipoCabina = 'inter
 /**
  * Get deposit and payment schedule.
  */
-function obtenerFechasPago() {
+async function obtenerFechasPago(args, botId) {
+  const settings = await getSettings(botId);
+  if (settings.planPayments) return settings.planPayments;
   return {
     primerDeposito: { monto: 200, moneda: 'USD', fecha: 'Inmediato al reservar' },
     segundoDeposito: { monto: 400, moneda: 'USD', fecha: '10 de septiembre de 2026' },
@@ -84,7 +90,9 @@ function obtenerFechasPago() {
 /**
  * Get what's included in the package.
  */
-function obtenerQueIncluye() {
+async function obtenerQueIncluye(args, botId) {
+  const settings = await getSettings(botId);
+  if (settings.planIncludes) return settings.planIncludes;
   return [
     'Transporte en Party Limo al puerto de Miami (Quinceañera + 1 invitado)',
     'Camiseta para la Quinceañera',
@@ -104,7 +112,9 @@ function obtenerQueIncluye() {
 /**
  * Get the cruise itinerary.
  */
-function obtenerItinerario() {
+async function obtenerItinerario(args, botId) {
+  const settings = await getSettings(botId);
+  if (settings.planItinerary) return settings.planItinerary;
   return {
     dias: [
       { dia: 1, fecha: '20 mar 2027', lugar: 'Miami, Florida', evento: 'Embarque 6:00 PM — Fiesta de bienvenida' },
@@ -123,7 +133,7 @@ function obtenerItinerario() {
  * Sales closing — registers the lead and triggers escalation to a human advisor.
  * The `_escalate` flag is detected by chatWithDeepSeek to send the email.
  */
-function iniciarCierreVenta({ nombre, telefono, email, num_personas, tipo_cabina, notas, motivo }) {
+async function iniciarCierreVenta({ nombre, telefono, email, num_personas, tipo_cabina, notas, motivo }, botId) {
   return {
     ok: true,
     lead: {
@@ -182,47 +192,6 @@ const TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'calcular_plan',
-      description: 'Calcula el costo total y la distribución de opciones (habitaciones, cabinas, asientos, etc.) para un grupo, según el número de personas y el tipo seleccionado. Llamar cuando el cliente pregunta por precios, planes o cotizaciones para un grupo.',
-      parameters: {
-        type: 'object',
-        properties: {
-          numPersonas:  { type: 'integer', description: 'Número total de personas del grupo' },
-          numAdultos:   { type: 'integer', description: 'Número de adultos' },
-          numMenores:   { type: 'integer', description: 'Número de menores' },
-          tipoCabina:   { type: 'string', description: 'Tipo de opción seleccionada (según el catálogo del negocio). Si no se especifica, usar el tipo estándar por defecto.' },
-        },
-        required: ['numPersonas', 'numAdultos', 'numMenores'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'obtener_fechas_pago',
-      description: 'Obtiene las fechas de depósitos, pagos programados y política de cancelación del producto o servicio.',
-      parameters: { type: 'object', properties: {} },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'obtener_que_incluye',
-      description: 'Obtiene la lista de todo lo que incluye el producto, servicio o paquete que ofrece el negocio.',
-      parameters: { type: 'object', properties: {} },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'obtener_itinerario',
-      description: 'Obtiene el itinerario completo (día por día, o paso a paso) del evento, viaje o servicio.',
-      parameters: { type: 'object', properties: {} },
-    },
-  },
-  {
-    type: 'function',
-    function: {
       name: 'iniciar_cierre_venta',
       description: 'Usa esta función cuando el cliente está listo para comprar o reservar. IMPORTANTE: antes de llamarla, pídele al cliente sus datos de contacto (nombre y teléfono o correo). Si ya te los dio, procede. También pregunta cuántas personas serán y qué opción prefiere.',
       parameters: {
@@ -243,10 +212,6 @@ const TOOLS = [
 
 const FUNCTION_MAP = {
   enviar_correo_informacion: enviarCorreo,
-  calcular_plan: calcularPlan,
-  obtener_fechas_pago: obtenerFechasPago,
-  obtener_que_incluye: obtenerQueIncluye,
-  obtener_itinerario: obtenerItinerario,
   iniciar_cierre_venta: iniciarCierreVenta,
 };
 
@@ -257,26 +222,6 @@ const FUNCTION_CATALOG = [
     name: 'enviar_correo_informacion',
     label: '📧 Enviar información por correo',
     description: 'Envía al cliente la información que solicite (precios, detalles, documentos, etc.) a su correo electrónico.',
-  },
-  {
-    name: 'calcular_plan',
-    label: '💰 Calcular plan de precios',
-    description: 'Calcula costos y presupuestos para un grupo según el número de personas y las opciones seleccionadas.',
-  },
-  {
-    name: 'obtener_fechas_pago',
-    label: '📅 Fechas de pago',
-    description: 'Devuelve los depósitos, pagos programados y la política de cancelación del producto o servicio.',
-  },
-  {
-    name: 'obtener_que_incluye',
-    label: '🎁 Qué incluye',
-    description: 'Lista todo lo que incluye el producto, servicio o paquete que ofrece el negocio.',
-  },
-  {
-    name: 'obtener_itinerario',
-    label: '🗓️ Itinerario',
-    description: 'Itinerario completo del evento, viaje o servicio, día por día (o paso a paso).',
   },
   {
     name: 'iniciar_cierre_venta',
