@@ -78,7 +78,8 @@ const VALIDATORS = {
   planPayments: (v) => v === null || typeof v === 'object',
 };
 
-const settingsCache = new Map(); // key: botId || '__global__'
+const settingsCache = new Map(); // key: botId || '__global__' → { data, ts }
+const CACHE_TTL_MS = 5000; // 5 segundos — suficiente para no re-leer en una misma request
 
 /** Carga settings desde DB, con fallback a env defaults. */
 async function load(botId) {
@@ -118,8 +119,13 @@ function cacheKey(botId) { return botId || '__global__'; }
 /** Copia de los settings actuales (nunca una referencia mutable). */
 async function getSettings(botId) {
   const key = cacheKey(botId);
-  if (!settingsCache.has(key)) settingsCache.set(key, await load(botId));
-  return { ...settingsCache.get(key) };
+  const entry = settingsCache.get(key);
+  if (entry && Date.now() - entry.ts < CACHE_TTL_MS) {
+    return { ...entry.data };
+  }
+  const data = await load(botId);
+  settingsCache.set(key, { data, ts: Date.now() });
+  return { ...data };
 }
 
 /** Aplica y persiste un subconjunto de settings. Lanza Error si algo es inválido. */
@@ -134,7 +140,7 @@ async function updateSettings(botId, patch = {}) {
     next[k] = k === 'escalationEmails' ? v.map((e) => e.trim()) : v;
   }
 
-  settingsCache.set(key, next);
+  settingsCache.set(key, { data: next, ts: Date.now() });
   await persist(botId, next);
   return await getSettings(botId);
 }

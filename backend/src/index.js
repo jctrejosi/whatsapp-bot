@@ -337,7 +337,9 @@ app.post('/bots/:id/knowledge/upload', async (req, res) => {
     const upstream = e.response?.data?.detail || e.message;
     res.status(502).json({ error: upstream || knowledgeError('/ingest') });
   }
-});('/bots/:id/knowledge/:sourceId', async (req, res) => {
+});
+
+app.delete('/bots/:id/knowledge/:sourceId', async (req, res) => {
   try {
     await knowledge.delete(`/sources/${req.params.sourceId}`);
     res.json({ ok: true });

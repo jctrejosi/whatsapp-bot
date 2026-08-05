@@ -39,8 +39,12 @@ FUNCIONES — úsalas DIRECTAMENTE, sin preámbulos ni sondeos:
 - Para saber qué incluye → llama listar_caracteristicas y entrega TODA la info.
 - Para itinerario/cronograma → llama obtener_cronograma y entrega el cronograma.
 - Para fechas de pago → llama obtener_fechas_pago.
-- Para precios/cotizaciones → si tienes los datos necesarios llama calcular_presupuesto.
-  Si NO los tienes, entrega PRIMERO toda la info disponible y luego pregunta.
+- Para precios/cotizaciones → REVISA PRIMERO los DATOS DISPONIBLES y comparte cualquier
+  precio, tarifa, costo o monto que encuentres. Si el cliente da los datos de su grupo
+  (personas, adultos, menores), INTENTA usar calcular_presupuesto. Si la función no está
+  disponible, CALCULA TÚ MISMO el costo total con los precios de los DATOS DISPONIBLES
+  (multiplicando personas × precio según tipo) y preséntaselo al cliente.
+  NUNCA pidas datos sin antes compartir la info de precios que tengas.
 - Si el cliente pide hablar con una persona → pide datos y usa comunicar_asesor.
 - Si el cliente pide envío por correo → pide su email y usa enviar_correo_informacion.
 - Cuando el cliente está listo para comprar → pide datos y usa iniciar_cierre_venta.
@@ -82,14 +86,47 @@ async function listModels() {
 }
 
 /**
+ * Translate a query to English for better cross-lingual embedding matches.
+ * Falls back to the original query if translation fails.
+ */
+async function translateToEnglish(text) {
+  try {
+    const { data } = await axios.post(
+      'https://api.deepseek.com/chat/completions',
+      {
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: 'Translate the user message to English. Return ONLY the translation, nothing else.' },
+          { role: 'user', content: text },
+        ],
+        temperature: 0,
+        max_tokens: 500,
+      },
+      { headers: DEEPSEEK_HEADERS, timeout: 8000 }
+    );
+    const translated = data.choices[0].message.content?.trim();
+    if (translated && translated.length > 0) {
+      console.log(`  🌐 Translated query: "${text.substring(0, 60)}..." → "${translated.substring(0, 60)}..."`);
+      return translated;
+    }
+  } catch (err) {
+    console.warn('  🌐 Translation failed, using original query:', err.message);
+  }
+  return text;
+}
+
+/**
  * Search the knowledge base for relevant context.
+ * Translates the query to English first for better cross-lingual embedding matches.
  */
 async function searchKnowledge(query, botId) {
   const { topK, useReranker, minConfidence } = await getSettings(botId);
   try {
+    // Translate query to English for better embedding similarity (el modelo es monolingüe)
+    const searchQuery = await translateToEnglish(query);
     const { data } = await axios.post(
       `${KNOWLEDGE_SERVICE_URL}/search`,
-      { query, top_k: topK, use_reranker: useReranker, min_similarity: minConfidence },
+      { query: searchQuery, top_k: topK, use_reranker: useReranker, min_similarity: minConfidence },
       { headers: { 'Content-Type': 'application/json' }, params: { bot_id: botId } }
     );
     return data.results || [];

@@ -602,7 +602,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onClick={uploading || saving ? undefined : onClose}>
       <div className="modal modal-config" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           {creating || nameEdit ? (
@@ -636,7 +636,7 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
               )}
             </div>
           )}
-          <button className="btn btn-secondary btn-sm" onClick={onClose}>✕</button>
+          <button className="btn btn-secondary btn-sm" onClick={onClose} disabled={uploading || saving}>✕</button>
         </div>
         <div className="settings-tabs">
           <button className={`tab-btn${tab === 'model' ? ' active' : ''}`} onClick={() => setTab('model')}>🧠 Modelo</button>
@@ -939,11 +939,11 @@ function SettingsPanel({ open, onClose, botId, botName, creating, onCreated, onB
           )}
         </div>
         <div className="modal-footer">
-          <button className="btn btn-primary" onClick={save} disabled={saving || (creating && !botNameInput.trim())}>
+          <button className="btn btn-primary" onClick={save} disabled={saving || uploading || (creating && !botNameInput.trim())}>
             {saving ? 'Guardando...' : creating ? '🚀 Crear y configurar' : '💾 Guardar cambios'}
           </button>
           {!creating && (
-            <button className="btn btn-secondary" onClick={reset} disabled={saving}>
+            <button className="btn btn-secondary" onClick={reset} disabled={saving || uploading}>
               ↺ Restablecer
             </button>
           )}
